@@ -11,10 +11,14 @@ export interface RiskThresholds {
   readonly confidence: number;
 }
 
+export type ExplanationLanguage = "en" | "zh";
+
 export interface Config {
   /** Null selects the current session model at request time. */
   readonly llm: {
     readonly model: ModelReference | null;
+    /** English by default; zh requests Simplified Chinese explanations only. */
+    readonly language: ExplanationLanguage;
     readonly timeoutMs: number;
   };
   /** Null disables classification without disabling command explanations. */

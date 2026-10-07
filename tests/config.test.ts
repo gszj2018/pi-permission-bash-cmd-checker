@@ -8,7 +8,7 @@ import {
 } from "../extension/config.ts";
 
 const expectedDefaults = {
-  llm: { model: null, timeoutMs: 30_000 },
+  llm: { model: null, language: "en", timeoutMs: 30_000 },
   classifier: {
     model: { provider: "typesafe", id: "jev-latest" },
     timeoutMs: 10_000,
@@ -43,7 +43,7 @@ test("partial sections default each omitted field without mutating the input", (
     status: "valid",
     config: {
       ...expectedDefaults,
-      llm: { model: null, timeoutMs: 1234 },
+      llm: { ...expectedDefaults.llm, timeoutMs: 1234 },
       classifier: {
         ...expectedDefaults.classifier,
         thresholds: { safe: 0.5, unsafe: 0.2, confidence: 0.8 },
@@ -65,6 +65,23 @@ test("explicit model references preserve slash-containing IDs and null disables 
   assert.equal(result.config.autoBlockUnsafe, true);
   reference.id = "changed";
   assert.equal(result.config.llm.model?.id, "vendor/model");
+});
+
+test("LLM explanation language accepts only English or Simplified Chinese without changing classification", () => {
+  for (const language of ["en", "zh"] as const) {
+    const input = Object.freeze({ llm: Object.freeze({ language }) });
+    const result = validateConfig(input);
+    assert.equal(result.status, "valid");
+    if (result.status !== "valid") continue;
+    assert.deepEqual(result.config.llm, { ...expectedDefaults.llm, language });
+    assert.deepEqual(result.config.classifier, DEFAULT_CONFIG.classifier);
+    assert.equal(input.llm.language, language);
+  }
+  for (const language of ["", "EN", "ZH", "zh-CN", "english", "中文", "fr", " en ", 1, true, null, undefined, {}, []]) {
+    assert.deepEqual(validateConfig({ llm: { language } }), {
+      status: "invalid", issues: ["llm.language: expected en or zh."],
+    });
+  }
 });
 
 test("threshold and timer boundaries are inclusive", () => {
@@ -110,7 +127,7 @@ test("invalid values and unknown fields reject the entire config without coercio
 
 test("config diagnostics contain neither supplied values nor unknown field names", () => {
   const secret = "SENSITIVE_CONFIG_MARKER";
-  const result = validateConfig({ [secret]: secret, llm: { timeoutMs: secret } });
+  const result = validateConfig({ [secret]: secret, llm: { timeoutMs: secret, language: secret } });
   assert.equal(result.status, "invalid");
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
@@ -132,6 +149,10 @@ test("schema defaults, accepted fields and numeric constraints match the runtime
     assert.equal(section.properties.timeoutMs.default, DEFAULT_CONFIG[name as "llm" | "classifier"].timeoutMs);
     assert.equal(section.properties.timeoutMs.$ref, "#/$defs/timeout");
   }
+  assert.deepEqual(Object.keys(schema.properties.llm.properties).sort(), ["language", "model", "timeoutMs"]);
+  assert.equal(schema.properties.llm.properties.language.type, "string");
+  assert.deepEqual(schema.properties.llm.properties.language.enum, ["en", "zh"]);
+  assert.equal(schema.properties.llm.properties.language.default, DEFAULT_CONFIG.llm.language);
   const thresholds = schema.properties.classifier.properties.thresholds;
   assert.equal(thresholds.additionalProperties, false);
   assert.deepEqual(thresholds.default, DEFAULT_CONFIG.classifier.thresholds);

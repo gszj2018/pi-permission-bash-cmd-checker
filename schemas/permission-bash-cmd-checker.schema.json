@@ -12,12 +12,18 @@
     "llm": {
       "type": "object",
       "additionalProperties": false,
-      "default": { "model": null, "timeoutMs": 30000 },
+      "default": { "model": null, "language": "en", "timeoutMs": 30000 },
       "properties": {
         "model": {
           "anyOf": [{ "$ref": "#/$defs/model" }, { "type": "null" }],
           "default": null,
           "description": "Null selects the current session model at request time. Explicit models do not fall back."
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "zh"],
+          "default": "en",
+          "description": "LLM explanation language: en for English, zh for Simplified Chinese. Does not affect classification or UI labels."
         },
         "timeoutMs": {
           "$ref": "#/$defs/timeout",

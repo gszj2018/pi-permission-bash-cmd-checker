@@ -8,7 +8,7 @@ export const CONFIG_FILE_NAME = "permission-bash-cmd-checker.json";
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
 export const DEFAULT_CONFIG: Config = Object.freeze({
-  llm: Object.freeze({ model: null, timeoutMs: 30_000 }),
+  llm: Object.freeze({ model: null, language: "en", timeoutMs: 30_000 }),
   classifier: Object.freeze({
     model: Object.freeze({ provider: "typesafe", id: "jev-latest" }),
     timeoutMs: 10_000,
@@ -78,7 +78,7 @@ export function validateConfig(value: unknown): ConfigValidationResult {
 
   const llm = Object.hasOwn(root, "llm") ? section(root.llm, "llm", issues) : {};
   const classifier = Object.hasOwn(root, "classifier") ? section(root.classifier, "classifier", issues) : {};
-  checkKeys(llm, ["model", "timeoutMs"], "llm", issues);
+  checkKeys(llm, ["model", "language", "timeoutMs"], "llm", issues);
   checkKeys(classifier, ["model", "timeoutMs", "thresholds"], "classifier", issues);
   const thresholds = Object.hasOwn(classifier, "thresholds")
     ? section(classifier.thresholds, "classifier.thresholds", issues)
@@ -86,6 +86,11 @@ export function validateConfig(value: unknown): ConfigValidationResult {
   checkKeys(thresholds, ["safe", "unsafe", "confidence"], "classifier.thresholds", issues);
 
   const llmModel = Object.hasOwn(llm, "model") ? model(llm.model, "llm.model", issues) : DEFAULT_CONFIG.llm.model;
+  let llmLanguage = DEFAULT_CONFIG.llm.language;
+  if (Object.hasOwn(llm, "language")) {
+    if (llm.language === "en" || llm.language === "zh") llmLanguage = llm.language;
+    else issues.push("llm.language: expected en or zh.");
+  }
   const classifierModel = Object.hasOwn(classifier, "model")
     ? model(classifier.model, "classifier.model", issues)
     : DEFAULT_CONFIG.classifier.model;
@@ -113,7 +118,7 @@ export function validateConfig(value: unknown): ConfigValidationResult {
   return {
     status: "valid",
     config: Object.freeze({
-      llm: Object.freeze({ model: llmModel, timeoutMs: llmTimeout }),
+      llm: Object.freeze({ model: llmModel, language: llmLanguage, timeoutMs: llmTimeout }),
       classifier: Object.freeze({
         model: classifierModel,
         timeoutMs: classifierTimeout,
