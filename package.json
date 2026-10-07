@@ -1,7 +1,7 @@
 {
   "name": "pi-permission-bash-cmd-checker",
   "version": "0.1.0",
-  "description": "Pi TUI extension for bash command explanations and optional classifier-based risk assessment",
+  "description": "Pi TUI enhancement plugin for @gotgenes/pi-permission-system with bash command explanations and optional risk assessment",
   "keywords": [
     "pi-package",
     "pi",
@@ -11,13 +11,12 @@
   "license": "MIT",
   "author": "gszj2018",
   "type": "module",
-  "engines": {
-    "node": ">=22.19.0"
-  },
   "files": [
     "extension",
     "schemas",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --import tsx --test",
