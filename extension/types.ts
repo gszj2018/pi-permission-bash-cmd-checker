@@ -124,7 +124,7 @@ export interface PermissionOutcome {
 }
 
 export interface CommandRecord {
-  readonly identity: symbol;
+  /** A frozen observation whose reference remains stable across this request's snapshots. */
   readonly observation: CommandObservation;
   readonly explanation: ExplanationState;
   readonly classification: ClassificationState;

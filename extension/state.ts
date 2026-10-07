@@ -23,7 +23,6 @@ export class SessionState implements SessionStateContract {
     const existing = this.records.get(observation.requestId);
     if (existing) return existing;
     const record: CommandRecord = Object.freeze({
-      identity: Symbol(observation.requestId),
       observation: Object.freeze({ ...observation, requester: Object.freeze({ ...observation.requester }) }),
       explanation: Object.freeze({ status: "pending" as const }),
       classification: Object.freeze({ status: classificationDisabled ? "disabled" as const : "pending" as const }),
@@ -34,10 +33,10 @@ export class SessionState implements SessionStateContract {
     return record;
   }
 
-  /** A captured record identifies its request even after subsequent immutable updates. */
+  /** The captured observation reference identifies its request across immutable updates. */
   publish(record: CommandRecord, update: AnalysisUpdate): boolean {
     const current = this.records.get(record.observation.requestId);
-    if (this.closed || current?.identity !== record.identity) return false;
+    if (this.closed || current?.observation !== record.observation) return false;
     if (update.kind === "explanation") {
       if (current.explanation.status !== "pending") return false;
       this.records.set(record.observation.requestId, Object.freeze({
@@ -56,7 +55,7 @@ export class SessionState implements SessionStateContract {
   /** A final verdict cannot be revised by a late classification or a repeated authorization call. */
   settleVerdict(record: CommandRecord, verdict: AuthorizerVerdict): boolean {
     const current = this.records.get(record.observation.requestId);
-    if (this.closed || current?.identity !== record.identity || current.verdictSettled) return false;
+    if (this.closed || current?.observation !== record.observation || current.verdictSettled) return false;
     this.records.set(record.observation.requestId, Object.freeze({
       ...current, verdict: Object.freeze({ ...verdict }), verdictSettled: true,
     }));

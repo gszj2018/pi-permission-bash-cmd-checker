@@ -68,7 +68,7 @@ export function attachPermissions(
     const controller = new AbortController();
     const publish: Parameters<CommandAnalyzer>[2] = (update) => {
       if (controller.signal.aborted || !state.publish(record, update)) return;
-      if (state.visible?.identity === record.identity) refresh();
+      if (state.visible?.observation === record.observation) refresh();
     };
     let resolveVerdict!: (value: AuthorizerVerdict) => void;
     const verdict = new Promise<AuthorizerVerdict>((resolve) => { resolveVerdict = resolve; });
@@ -86,7 +86,7 @@ export function attachPermissions(
         : { kind: "defer" };
       if (state.settleVerdict(record, decision)) {
         // Missing permission prompts still track the settled verdict; automatic denial never re-shows a covered widget.
-        if (state.visible?.identity === record.identity) refresh();
+        if (state.visible?.observation === record.observation) refresh();
         if (decision.kind === "deny") notify(ctx, "Blocked a bash command assessed as dangerous.");
       }
       resolveVerdict(decision);

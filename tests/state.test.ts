@@ -18,14 +18,16 @@ test("state deduplicates only request IDs, retains all completed records and kee
   const first = observe(state);
   assert.equal(observe(state), first);
   const second = observe(state, "request-2");
-  assert.notEqual(first.identity, second.identity);
+  assert.notEqual(first.observation, second.observation);
   assert.equal(state.size, 2);
+  assert.ok(Object.isFrozen(first.observation));
   assert.ok(Object.isFrozen(first.observation.requester));
   const initiallyVisible = state.visible;
   assert.equal(initiallyVisible, undefined);
   assert.equal(state.show("request-1"), first);
   state.decide("request-1", { result: "allow", resolution: "user_approved" });
   assert.equal(state.visible?.decision?.result, "allow");
+  assert.equal(state.visible?.observation, first.observation);
   assert.equal(state.size, 2);
   assert.equal(first.decision, undefined);
   assert.equal(state.decide("request-1", { result: "deny", resolution: "user_denied" }), false);
@@ -38,6 +40,7 @@ test("final verdicts are immutable, settle once and cannot cross a session gener
   assert.equal(state.settleVerdict(record, { kind: "deny", reason: "Fixed policy reason." }), true);
   const settled = state.get("request-1")!;
   assert.equal(settled.verdictSettled, true);
+  assert.equal(settled.observation, record.observation);
   assert.deepEqual(settled.verdict, { kind: "deny", reason: "Fixed policy reason." });
   assert.ok(Object.isFrozen(settled.verdict));
   assert.equal(state.settleVerdict(record, { kind: "defer" }), false);
@@ -50,7 +53,7 @@ test("final verdicts are immutable, settle once and cannot cross a session gener
   assert.equal(state.settleVerdict(record, { kind: "defer" }), false);
 });
 
-test("captured identities permit independent late results without changing the visible request", () => {
+test("captured observations permit independent late results without changing the visible request", () => {
   const state = new SessionState();
   const first = observe(state);
   const second = observe(state, "request-2");
@@ -58,7 +61,8 @@ test("captured identities permit independent late results without changing the v
   assert.equal(state.publish(first, { kind: "explanation", value: { status: "complete", text: "First explanation" } }), true);
   assert.equal(state.publish(first, { kind: "classification", value: { status: "failed" } }), true);
   assert.equal(state.get("request-1")?.explanation.status, "complete");
-  assert.equal(state.visible?.identity, second.identity);
+  assert.equal(state.get("request-1")?.observation, first.observation);
+  assert.equal(state.visible?.observation, second.observation);
   assert.equal(state.publish(first, { kind: "classification", value: { status: "unavailable" } }), false);
   assert.equal(state.publish(first, { kind: "explanation", value: { status: "unavailable" } }), false);
 });
@@ -83,7 +87,7 @@ test("hiding an unsupported prompt clears only visibility, not the cache", () =>
   assert.equal(state.size, 1);
 });
 
-test("session closure is idempotent and old generation identities cannot update a new session", () => {
+test("session closure is idempotent and old observations cannot update a new session", () => {
   const old = new SessionState();
   const record = observe(old);
   old.show("request-1");
@@ -96,7 +100,10 @@ test("session closure is idempotent and old generation identities cannot update 
   assert.equal(old.decide("request-1", { result: "allow", resolution: "user_approved" }), false);
   assert.equal(old.publish(record, { kind: "explanation", value: { status: "unavailable" } }), false);
   const fresh = new SessionState();
-  observe(fresh);
+  const freshRecord = fresh.observe(record.observation);
+  assert.ok(freshRecord);
+  assert.deepEqual(freshRecord.observation, record.observation);
+  assert.notEqual(freshRecord.observation, record.observation);
   assert.notEqual(fresh.generation, old.generation);
   assert.equal(fresh.publish(record, { kind: "explanation", value: { status: "unavailable" } }), false);
 });
