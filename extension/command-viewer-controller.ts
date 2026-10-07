@@ -36,9 +36,7 @@ export function createCommandViewerController(
 ): CommandViewerController {
   // One private slot per controller, reserved throughout synchronous/reentrant creation and closing.
   const slot: ViewerSlot = {};
-  let currentSource: { token: symbol; snapshot: CommandSnapshot } | undefined;
-  // Keep the host available after the source is removed so an existing viewer can still close.
-  let owner: TUI | undefined;
+  let currentSource: { token: symbol; snapshot: CommandSnapshot; owner: TUI } | undefined;
   let disposed = false;
   let unsubscribe: (() => void) | undefined;
 
@@ -78,7 +76,7 @@ export function createCommandViewerController(
 
   try {
     unsubscribe = ui.onTerminalInput((data) => {
-      if (disposed || !owner) return;
+      if (disposed) return;
       // Closing-key suppression belongs to this controller, not to any live command source.
       if (slot.closingKey && matchesKey(data, slot.closingKey)) {
         if (isKeyRelease(data)) { slot.closingKey = undefined; return { consume: true }; }
@@ -86,13 +84,13 @@ export function createCommandViewerController(
         slot.closingKey = undefined;
       }
       if (!matchesKey(data, shortcut)) return;
-      const snapshot = currentSource?.snapshot;
-      if (!slot.interaction && !snapshot) return;
+      const source = currentSource;
+      if (!slot.interaction && !source) return;
       if (isShortcutPress(data, shortcut)) {
         if (slot.interaction) {
           slot.closingKey = shortcut;
           closeViewer(slot.interaction);
-        } else if (snapshot) openViewer(snapshot, owner);
+        } else if (source) openViewer(source.snapshot, source.owner);
       }
       return { consume: true };
     });
@@ -110,9 +108,8 @@ export function createCommandViewerController(
       return {
         update(snapshot, tui) {
           if (disposed || released) return;
-          owner = tui;
           // Only the latest update is retained; clearing it must not restore an older command.
-          currentSource = { token: source, snapshot: Object.freeze({ ...snapshot }) };
+          currentSource = { token: source, snapshot: Object.freeze({ ...snapshot }), owner: tui };
         },
         clear,
         dispose() { released = true; clear(); },

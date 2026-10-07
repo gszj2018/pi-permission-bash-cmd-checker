@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { createCommandViewerController } from "../extension/command-viewer-controller.ts";
-import { MockUi } from "./helpers/mocks.ts";
+import { MockUi, mockTheme } from "./helpers/mocks.ts";
 
 const toggle = "\u001bc";
 const alternate = "\u001bm";
@@ -34,6 +34,34 @@ test("command sources provide immutable opening data but do not own viewer lifet
   assert.equal(ui.input(toggle), false);
   viewer.dispose();
   assert.equal(ui.inputHandlers.size, 0);
+});
+
+test("an open viewer retains its captured TUI after its current source is removed", (t) => {
+  for (const operation of ["clear", "dispose"] as const) {
+    const { ui, source } = setup(t);
+    const fullCommand = Array.from({ length: 40 }, (_, index) => `printf 'captured-${index}'`).join("\n");
+    source.update({ requestId: "captured", fullCommand }, ui.tui);
+    ui.input(toggle);
+    assert.ok(ui.overlayText().includes("captured-0"));
+    source[operation]();
+    ui.columns = 32;
+    ui.rows = 12;
+    ui.currentTheme = mockTheme("light");
+    assert.ok(ui.overlayText().includes("captured-0"));
+    const renders = ui.renders;
+    ui.input("\u001b[F");
+    assert.ok(ui.overlayText().includes("captured-39"));
+    assert.ok(ui.renders > renders);
+    const rows = ui.overlays[0]!.component.render(Math.floor(ui.columns * 0.9));
+    assert.ok(rows.length <= Math.floor(ui.rows * 0.8));
+    assert.ok(rows.every((row) => row.includes("\u001b[48;2;220;235;255m")));
+    ui.input("\u001b[H");
+    assert.ok(ui.overlayText().includes("captured-0"));
+    assert.equal(ui.input(toggle), true);
+    assert.equal(ui.overlays.length, 0);
+    assert.equal(ui.input(toggle), false);
+    assert.equal(ui.overlayHistory.length, 1);
+  }
 });
 
 test("clearing an older source cannot revoke a newer source or change an open snapshot", (t) => {
@@ -193,24 +221,26 @@ test("a failed hide retains the single-viewer reservation until a later close su
   assert.equal(ui.overlayHistory.length, 2);
 });
 
-test("closing-key repeat and release suppression survives source disposal", (t) => {
+test("closing-key repeat and release suppression survives clearing or disposing the current source", (t) => {
   const cases = [
     ["\u001b", "\u001b[27;1:2u", "\u001b[27;1:3u"],
     ["q", "\u001b[113;1:2u", "\u001b[113;1:3u"],
     ["\r", "\u001b[13;1:2u", "\u001b[13;1:3u"],
     [toggle, "\u001b[99;3:2u", "\u001b[99;3:3u"],
   ];
-  for (const [press, repeat, release] of cases) {
-    const { ui, source } = setup(t);
-    source.update({ requestId: "first", fullCommand: "printf 'first command'" }, ui.tui);
-    ui.input(toggle);
-    source.dispose();
-    assert.equal(ui.input(press!), true);
-    assert.equal(ui.overlays.length, 0);
-    assert.equal(ui.input(repeat!), true);
-    assert.equal(ui.input(release!), true);
-    assert.equal(ui.editorInputs.length, 0);
-    assert.equal(ui.input("q"), false);
+  for (const operation of ["clear", "dispose"] as const) {
+    for (const [press, repeat, release] of cases) {
+      const { ui, source } = setup(t);
+      source.update({ requestId: "first", fullCommand: "printf 'first command'" }, ui.tui);
+      ui.input(toggle);
+      source[operation]();
+      assert.equal(ui.input(press!), true);
+      assert.equal(ui.overlays.length, 0);
+      assert.equal(ui.input(repeat!), true);
+      assert.equal(ui.input(release!), true);
+      assert.equal(ui.editorInputs.length, 0);
+      assert.equal(ui.input("q"), false);
+    }
   }
 });
 
