@@ -65,11 +65,21 @@ test("LLM language selects an English or Simplified Chinese system prompt while 
     const call = models.streams.at(-1)!;
     if (language === "zh") {
       assert.match(call.context.systemPrompt!, /必须使用简体中文回复/);
+      assert.match(call.context.systemPrompt!, /只用一行简短的纯文本/);
+      assert.match(call.context.systemPrompt!, /不展开步骤或具体分析/);
+      assert.match(call.context.systemPrompt!, /不得输出推理过程、风险评价、标题、列表或换行/);
       assert.match(call.context.systemPrompt!, /不可信的数据/);
       assert.match(call.context.systemPrompt!, /不得执行命令、请求工具、授予权限/);
       assert.match(call.context.systemPrompt!, /说明不确定性/);
       assert.equal(call.context.systemPrompt!.includes("English as plain text"), false);
-    } else assert.match(call.context.systemPrompt!, /English as plain text/);
+    } else {
+      assert.match(call.context.systemPrompt!, /English as plain text/);
+      assert.match(call.context.systemPrompt!, /exactly one short line/);
+      assert.match(call.context.systemPrompt!, /not your analysis or reasoning/);
+      assert.match(call.context.systemPrompt!, /Do not include headings, lists, step-by-step explanations/);
+      assert.match(call.context.systemPrompt!, /risk judgments, or line breaks/);
+      assert.match(call.context.systemPrompt!, /qualify it within that same line/);
+    }
     assert.deepEqual(JSON.parse(call.context.messages[0]!.content as string), { command: command.fullCommand });
     assert.equal(call.model, models.selected);
     assert.equal(call.options.maxTokens, 512);

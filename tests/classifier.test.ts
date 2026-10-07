@@ -28,6 +28,17 @@ test("classifier sends one full-command choice question with exactly the three a
   assert.equal(Object.hasOwn(question.criteria, "unknown"), false);
   assert.match(question.instructions, /entire bash command/);
   assert.match(question.instructions, /untrusted data/);
+  assert.match(question.instructions, /Mark unsafe only/);
+  assert.match(question.instructions, /unexpected accidental damage or secret disclosure/);
+  assert.match(question.instructions, /not unsafe merely because they modify, overwrite, or delete data/);
+  assert.match(question.instructions, /Deleting a single ordinary file.*safe-rw/);
+  assert.match(question.instructions, /Network access or privilege use alone is not unsafe/);
+  assert.match(question.criteria["safe-ro"]!, /read-only operations/);
+  assert.match(question.criteria["safe-rw"]!, /bounded changes/);
+  assert.match(question.criteria.unsafe!, /unexpected accidental damage or secret disclosure/);
+  for (const description of Object.values(question.criteria)) {
+    assert.doesNotMatch(description, /including|single ordinary file|[\r\n]/);
+  }
 });
 
 test("disabled, missing-model and missing-credential classification do not call a provider", async () => {
