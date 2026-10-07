@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bash Command Checker Configuration",
+  "description": "Reload Pi after changing this file. Invalid configuration disables the checker, not the permission system.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional schema location for editor validation."
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": { "model": null, "timeoutMs": 30000 },
+      "properties": {
+        "model": {
+          "anyOf": [{ "$ref": "#/$defs/model" }, { "type": "null" }],
+          "default": null,
+          "description": "Null selects the current session model at request time. Explicit models do not fall back."
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/timeout",
+          "default": 30000,
+          "description": "Background explanation deadline in milliseconds."
+        }
+      }
+    },
+    "classifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {
+        "model": { "provider": "typesafe", "id": "jev-latest" },
+        "timeoutMs": 10000,
+        "thresholds": { "safe": 0.5, "unsafe": 0.3, "confidence": 0.8 }
+      },
+      "properties": {
+        "model": {
+          "anyOf": [{ "$ref": "#/$defs/model" }, { "type": "null" }],
+          "default": { "provider": "typesafe", "id": "jev-latest" },
+          "description": "Null disables classification. No automatic provider fallback is used."
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/timeout",
+          "default": 10000,
+          "description": "Total classification deadline, including model availability checks, in milliseconds."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": { "safe": 0.5, "unsafe": 0.3, "confidence": 0.8 },
+          "properties": {
+            "safe": {
+              "$ref": "#/$defs/probability",
+              "default": 0.5,
+              "description": "Minimum probability for safe-ro or safe-rw, also requiring the confidence threshold."
+            },
+            "unsafe": {
+              "$ref": "#/$defs/probability",
+              "default": 0.3,
+              "description": "Minimum unsafe probability, also requiring the confidence threshold. Unsafe takes priority."
+            },
+            "confidence": {
+              "$ref": "#/$defs/probability",
+              "default": 0.8,
+              "description": "Minimum confidence required to accept any of the three classifier labels."
+            }
+          }
+        }
+      }
+    },
+    "autoBlockUnsafe": {
+      "type": "boolean",
+      "default": false,
+      "description": "Deny only validated unsafe classifications. All other outcomes defer; never automatically allow."
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "id"],
+      "properties": {
+        "provider": { "type": "string", "pattern": "\\S" },
+        "id": { "type": "string", "pattern": "\\S" }
+      }
+    },
+    "timeout": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "probability": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}
