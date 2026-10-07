@@ -202,6 +202,9 @@ export function createCommandViewerController(
         dispose() { released = true; clear(); },
       };
     },
+    close() {
+      if (!disposed && slot.interaction) closeViewer(slot.interaction);
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

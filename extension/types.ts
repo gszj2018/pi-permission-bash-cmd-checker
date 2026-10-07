@@ -115,6 +115,7 @@ export interface CommandViewerSource {
 
 export interface CommandViewerController {
   createSource(): CommandViewerSource;
+  close(): void;
   dispose(): void;
 }
 

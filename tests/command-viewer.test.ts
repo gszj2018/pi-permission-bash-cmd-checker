@@ -291,6 +291,57 @@ test("creating a new source without an update cannot replace the current command
   assert.ok(ui.overlayText().includes("current command"));
 });
 
+test("programmatic close affects only the owned viewer and preserves sources and input for reopening", (t) => {
+  const first = setupController(t);
+  const second = setupController(t, first.ui, "alt+m");
+  first.source.update({ requestId: "first", fullCommand: "printf 'first command'" }, first.ui.tui);
+  second.source.update({ requestId: "second", fullCommand: "printf 'second command'" }, first.ui.tui);
+  first.viewer.close();
+  assert.equal(first.ui.closeCalls, 0);
+  first.ui.input(toggle);
+  const owned = first.ui.overlays[0]!;
+  first.ui.input(alternate);
+  const other = first.ui.overlays[1]!;
+  const hide = owned.handle.hide;
+  owned.handle.hide = () => { throw new Error("SENSITIVE_HIDE_ERROR"); };
+  assert.doesNotThrow(() => first.viewer.close());
+  assert.equal(first.ui.overlays.length, 2);
+  assert.equal(first.ui.overlayHistory.length, 2);
+  owned.handle.hide = hide;
+  first.viewer.close();
+  first.viewer.close();
+  assert.equal(owned.closed, true);
+  assert.equal(other.closed, false);
+  assert.equal(first.ui.overlays.length, 1);
+  assert.equal(first.ui.closeCalls, 1);
+  assert.equal(first.ui.inputHandlers.size, 2);
+  first.ui.input(toggle);
+  assert.equal(first.ui.overlays.length, 2);
+  assert.ok(first.ui.overlayText().includes("first command"));
+  assert.equal(JSON.stringify(first.ui.notifications).includes("SENSITIVE_HIDE_ERROR"), false);
+});
+
+test("programmatic close during creation closes the returned handle without disposing the controller", (t) => {
+  const { ui, viewer, source } = setupController(t);
+  source.update({ requestId: "first", fullCommand: "printf 'first command'" }, ui.tui);
+  const showOverlay = ui.tui.showOverlay;
+  let closeDuringCreation = true;
+  ui.tui.showOverlay = (component, options) => {
+    if (closeDuringCreation) {
+      closeDuringCreation = false;
+      viewer.close();
+    }
+    return showOverlay(component, options);
+  };
+  ui.input(toggle);
+  assert.equal(ui.overlays.length, 0);
+  assert.equal(ui.closeCalls, 1);
+  assert.equal(ui.inputHandlers.size, 1);
+  ui.input(toggle);
+  assert.equal(ui.overlays.length, 1);
+  assert.ok(ui.overlayText().includes("first command"));
+});
+
 test("controllers in the same TUI keep separate slots and close only their own viewers", (t) => {
   const first = setupController(t);
   const second = setupController(t, first.ui, "alt+m");

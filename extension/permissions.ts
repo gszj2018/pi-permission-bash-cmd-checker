@@ -160,6 +160,7 @@ export function attachPermissions(
     }));
     subscriptions.push(pi.events.on("permissions:ui_prompt", (raw) => {
       if (!state.active || !isRecord(raw) || !isNonBlankString(raw.requestId)) return;
+      viewer.close();
       state.show(raw.requestId);
       refresh();
     }));

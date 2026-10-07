@@ -237,7 +237,7 @@ test("explicitly disabled classification remains yellow and defers even with aut
   runtime.dispose();
 });
 
-test("permission events cannot change a viewer snapshot or close it when hiding the live widget", async (t) => {
+test("only valid permission prompts close the viewer, preserving analysis, decisions and reopening", async (t) => {
   const jobs = new Map<string, { publish: (update: AnalysisUpdate) => void; done: ReturnType<typeof deferred<void>> }>();
   const app = setup(mockBackgroundAnalyzer(async (command, _signal, publish) => {
     const done = deferred<void>();
@@ -261,16 +261,23 @@ test("permission events cannot change a viewer snapshot or close it when hiding 
   assert.equal(app.ui.overlayText(), locked);
   const second = commandDetails("live-second", "printf 'second command'");
   await app.service.run(second);
+  assert.equal(app.ui.overlayText(), locked);
+  app.pi.events.emit("permissions:ui_prompt", { requestId: "" });
+  assert.equal(app.ui.overlayText(), locked);
+  assert.equal(app.ui.closeCalls, 0);
   app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
   assert.ok(app.ui.text(WIDGET_KEY).includes("second command"));
-  assert.equal(app.ui.overlayText(), locked);
+  assert.equal(app.ui.overlays.length, 0);
+  assert.equal(app.ui.closeCalls, 1);
+  assert.equal(app.ui.inputHandlers.size, 1);
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
+  assert.equal(app.ui.closeCalls, 1);
+  app.ui.input("\u001bc");
+  assert.ok(app.ui.overlayText().includes("second command"));
   app.pi.events.emit("permissions:ui_prompt", { requestId: "unobserved" });
   assert.equal(app.ui.components.size, 0);
-  assert.equal(app.ui.overlays.length, 1);
-  assert.equal(app.ui.overlayText(), locked);
-  app.ui.input("\r");
-  await flushPromises();
   assert.equal(app.ui.overlays.length, 0);
+  assert.equal(app.ui.closeCalls, 2);
   assert.equal(app.ui.editorInputs.length, 0);
   assert.equal(app.runtime.state.get(first.requestId)?.decision?.result, "allow");
   app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
