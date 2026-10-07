@@ -55,6 +55,82 @@ test("the gate waits for classification while displaying the command immediately
   assert.equal(app.clock.pending, 0);
 });
 
+test("concurrent requests keep independent classifications, deadlines and records when they settle out of order", async (t) => {
+  const app = setup();
+  t.after(app.runtime.dispose);
+  const classifications = [deferred<unknown>(), deferred<unknown>()];
+  const explanations = [deferred<unknown>(), deferred<unknown>()];
+  let classifierCalls = 0;
+  let explanationCalls = 0;
+  app.models.classifierResult = () => { const index = classifierCalls++; return classifications[index]!.promise; };
+  app.models.llmResult = () => { const index = explanationCalls++; return explanations[index]!.promise; };
+  const first = commandDetails("concurrent-first", "printf 'first concurrent command'");
+  const second = commandDetails("concurrent-second", "printf 'second concurrent command'");
+  const firstVerdict = app.service.run(first);
+  const secondVerdict = app.service.run(second);
+  await flushPromises();
+  const riskOf = (requestId: string): unknown => {
+    const classification = app.runtime.state.get(requestId)?.classification;
+    return classification?.status === "complete" ? classification.risk : classification?.status;
+  };
+  assert.equal(app.models.classifications.length, 2);
+  assert.equal(app.models.streams.length, 2);
+  assert.equal(app.runtime.state.size, 2);
+  assert.equal(app.runtime.state.visible?.observation.requestId, second.requestId);
+  assert.equal(app.ui.mounts.length, 1);
+  for (const [index, details] of [first, second].entries()) {
+    const command = details.payload.evidence[0]!.text;
+    assert.equal(app.models.classifications[index]?.options.signal?.aborted, false);
+    assert.equal(app.models.streams[index]?.options.signal?.aborted, false);
+    assert.deepEqual(app.models.classifications[index]?.context.state, { command });
+    assert.equal(app.models.streams[index]?.context.messages[0]?.content, JSON.stringify({ command }));
+    assert.equal(app.runtime.state.get(details.requestId)?.verdictSettled, false);
+  }
+  // The newer request settles first, without touching the older pending record, its deadline or visibility.
+  classifications[1]!.resolve(riskResponse(1));
+  assert.deepEqual(await secondVerdict, { kind: "defer" });
+  assert.equal(riskOf(second.requestId), "unsafe");
+  assert.equal(riskOf(first.requestId), "pending");
+  assert.equal(app.runtime.state.get(first.requestId)?.verdictSettled, false);
+  assert.equal(app.runtime.state.visible?.observation.requestId, second.requestId);
+  assert.ok(app.ui.text(WIDGET_KEY).includes(second.payload.evidence[0]!.text));
+  assert.equal(app.ui.text(WIDGET_KEY).includes(first.payload.evidence[0]!.text), false);
+  // Each request owns its classification deadline: the older one times out without disturbing the newer record.
+  app.clock.advance(DEFAULT_CONFIG.classifier.timeoutMs);
+  assert.deepEqual(await firstVerdict, { kind: "defer" });
+  assert.equal(riskOf(first.requestId), "timed-out");
+  assert.equal(riskOf(second.requestId), "unsafe");
+  assert.equal(app.runtime.state.visible?.observation.requestId, second.requestId);
+  assert.ok(app.ui.text(WIDGET_KEY).includes(second.payload.evidence[0]!.text));
+  classifications[0]!.resolve(riskResponse(0.05));
+  await flushPromises();
+  assert.equal(riskOf(first.requestId), "timed-out");
+  // Late explanations update only their own record, and a later prompt switches the single reused widget.
+  explanations[1]!.resolve(explanationResponse("Second concurrent explanation."));
+  explanations[0]!.resolve(explanationResponse("First concurrent explanation."));
+  await flushPromises();
+  assert.deepEqual(app.runtime.state.get(second.requestId)?.explanation, {
+    status: "complete", text: "Second concurrent explanation.",
+  });
+  assert.deepEqual(app.runtime.state.get(first.requestId)?.explanation, {
+    status: "complete", text: "First concurrent explanation.",
+  });
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Second concurrent explanation."));
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(first));
+  assert.equal(app.runtime.state.visible?.observation.requestId, first.requestId);
+  const visible = app.ui.text(WIDGET_KEY);
+  assert.ok(visible.includes("First concurrent explanation."));
+  assert.ok(visible.includes("Risk assessment timed out."));
+  assert.equal(visible.includes("Second concurrent explanation."), false);
+  assert.equal(visible.includes("⛔  Dangerous"), false);
+  assert.equal(app.ui.mounts.length, 1);
+  assert.deepEqual(await app.service.run(first), { kind: "defer" });
+  assert.deepEqual(await app.service.run(second), { kind: "defer" });
+  assert.equal(app.models.classifications.length, 2);
+  assert.equal(app.models.streams.length, 2);
+  assert.equal(app.clock.pending, 0);
+});
+
 test("preview truncation and full-command viewing never change model inputs or start additional analysis", async (t) => {
   const app = setup(blockingConfig);
   t.after(app.runtime.dispose);
