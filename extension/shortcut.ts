@@ -2,14 +2,14 @@ import { isKeyRelease, isKeyRepeat, matchesKey, type KeyId } from "@earendil-wor
 
 export const DEFAULT_COMMAND_VIEWER_SHORTCUT: KeyId = "alt+c";
 
-// Reserve viewer controls; omit '+' as a base key because the host splits identifiers on '+'.
-// The equivalent explicit shift+= binding is supported. Modifiers must not repeat.
+// Require at least one non-repeated modifier; bare keys must not toggle the viewer.
+// Exclude escape/esc, clear and function keys from configuration; Escape remains a fixed viewer close key.
+// Omit '+' as a base key because the host splits identifiers on '+'; use explicit shift+= instead.
 export const COMMAND_VIEWER_SHORTCUT_PATTERN =
-  "^(?!(?:escape|esc|q|enter|return|up|down|pageUp|pageDown|home|end)$)" +
-  "(?!.*\\b(ctrl|alt|shift|super)\\+.*\\b\\1\\+)" +
-  "(?:(?:ctrl|alt|shift|super)\\+){0,4}" +
+  "^(?!.*\\b(ctrl|alt|shift|super)\\+.*\\b\\1\\+)" +
+  "(?:(?:ctrl|alt|shift|super)\\+){1,4}" +
   "(?:[a-z0-9\\x60=\\[\\]\\\\;'.,/!@#$%^&*()_|~{}:<>?\\-]|" +
-  "escape|esc|enter|return|tab|space|backspace|delete|insert|clear|home|end|pageUp|pageDown|up|down|left|right|f(?:[1-9]|1[0-2]))" +
+  "enter|return|tab|space|backspace|delete|insert|home|end|pageUp|pageDown|up|down|left|right)" +
   "(?![\\s\\S])";
 const shortcutPattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
 

@@ -28,10 +28,10 @@ test("toggle opens a focused read-only overlay only for a visible command and pr
   assert.equal(ui.input(toggle), false);
   assert.equal(ui.overlays.length, 0);
   controller.show(record());
-  assert.equal(ui.input(";"), false);
-  assert.equal(ui.input("c"), false);
-  assert.equal(ui.input("q"), false);
-  assert.equal(ui.input("\r"), false);
+  const ordinaryInputsBeforeOpening = [";", "c", "q", " ", "\t", "\r", "\u007f", "\u001b[D", "\u001b[C",
+    "\u001b[3~", "\u001b[2~", "\u001b[E"];
+  for (const input of ordinaryInputsBeforeOpening) assert.equal(ui.input(input), false, input);
+  assert.deepEqual(ui.editorInputs.slice(-ordinaryInputsBeforeOpening.length), ordinaryInputsBeforeOpening);
   assert.equal(ui.input("\u001b[99;3:2u"), true);
   assert.equal(ui.input("\u001b[99;3:3u"), true);
   assert.equal(ui.overlayHistory.length, 0);

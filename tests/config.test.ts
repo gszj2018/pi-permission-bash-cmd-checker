@@ -89,7 +89,8 @@ test("LLM explanation language accepts only English or Simplified Chinese withou
 
 test("command viewer shortcuts default per field and strictly validate without changing analysis", () => {
   assert.deepEqual(validateConfig({ widget: {} }), validateConfig({}));
-  for (const commandViewerShortcut of ["alt+c", "ctrl+;", "alt+m", "ctrl+alt+v", "ctrl+shift+=", "f6", "super+k"]) {
+  for (const commandViewerShortcut of ["alt+c", "ctrl+;", "alt+m", "ctrl+alt+v", "ctrl+shift+=", "super+k",
+    "ctrl+space", "alt+tab", "ctrl+backspace", "alt+left", "ctrl+right", "shift+delete", "ctrl+insert"]) {
     const widget = Object.freeze({ commandViewerShortcut });
     const input = Object.freeze({ widget });
     const result = validateConfig(input);
@@ -103,6 +104,10 @@ test("command viewer shortcuts default per field and strictly validate without c
   for (const commandViewerShortcut of [
     "", "Ctrl+;", "ctrl+; ", "ctrl+;\n", "control+x", "ctrl+ctrl+x", "ctrl+f13", "unknown", "ctrl+", "ctrl++", "+",
     "esc", "escape", "q", "enter", "return", "up", "down", "pageUp", "pageDown", "home", "end",
+    "space", "tab", "backspace", "left", "right", "delete", "insert", "clear", "c", "0", ";", "f1", "f6", "f12",
+    "ctrl+escape", "ctrl+esc", "alt+escape", "alt+esc", "shift+escape", "shift+esc", "super+escape", "super+esc",
+    "ctrl+alt+escape", "ctrl+alt+esc", "shift+ctrl+alt+super+escape", "shift+ctrl+alt+super+esc",
+    "ctrl+f1", "ctrl+f6", "alt+f12", "ctrl+clear", "alt+clear", "shift+clear", "super+clear",
     null, undefined, 1, false, {}, [],
   ]) {
     assert.deepEqual(validateConfig({ widget: { commandViewerShortcut } }), {
@@ -180,6 +185,21 @@ test("schema defaults, accepted fields and numeric constraints match the runtime
   assert.equal(shortcut.type, "string");
   assert.equal(shortcut.default, DEFAULT_CONFIG.widget.commandViewerShortcut);
   assert.equal(shortcut.pattern, COMMAND_VIEWER_SHORTCUT_PATTERN);
+  const shortcutPattern = new RegExp(shortcut.pattern);
+  for (const key of ["c", ";", "space", "tab", "backspace", "left", "right", "delete", "insert"]) {
+    assert.equal(shortcutPattern.test(key), false, key);
+    assert.equal(validateConfig({ widget: { commandViewerShortcut: key } }).status, "invalid", key);
+    assert.equal(shortcutPattern.test(`ctrl+${key}`), true, key);
+    assert.equal(validateConfig({ widget: { commandViewerShortcut: `ctrl+${key}` } }).status, "valid", key);
+  }
+  const excludedKeys = ["escape", "esc", "clear", ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`)];
+  for (const prefix of ["", "ctrl+", "alt+", "shift+", "super+", "ctrl+alt+", "shift+ctrl+alt+super+"]) {
+    for (const baseKey of excludedKeys) {
+      const key = `${prefix}${baseKey}`;
+      assert.equal(shortcutPattern.test(key), false, key);
+      assert.equal(validateConfig({ widget: { commandViewerShortcut: key } }).status, "invalid", key);
+    }
+  }
   for (const name of ["llm", "classifier"]) {
     const section = schema.properties[name];
     assert.equal(section.additionalProperties, false);

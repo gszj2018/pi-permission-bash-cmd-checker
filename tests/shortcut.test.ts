@@ -7,9 +7,10 @@ import {
 
 const toggle = "\u001b[59;5u";
 
-test("shortcut syntax preserves canonical Pi identifiers and reserves viewer control keys", () => {
+test("shortcut syntax preserves canonical Pi identifiers and rejects invalid or repeated modifiers", () => {
   const schemaPattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
-  for (const key of ["alt+c", "ctrl+;", "alt+m", "f1", "f12", "ctrl+shift+=", "ctrl+\\", "shift+ctrl+alt+super+pageDown", "ctrl+escape"]) {
+  for (const key of ["alt+c", "ctrl+;", "alt+m", "ctrl+shift+=", "ctrl+\\",
+    "shift+ctrl+alt+super+pageDown", "ctrl+enter"]) {
     assert.equal(isCommandViewerShortcut(key), true, key);
     assert.equal(schemaPattern.test(key), true, key);
   }
@@ -23,6 +24,36 @@ test("shortcut syntax preserves canonical Pi identifiers and reserves viewer con
   assert.equal(shortcutLabel(DEFAULT_COMMAND_VIEWER_SHORTCUT), "Alt+c");
   assert.equal(shortcutLabel("ctrl+;"), "Ctrl+;");
   assert.equal(shortcutLabel("alt+ctrl+v"), "Alt+Ctrl+v");
+});
+
+test("every supported base key requires at least one modifier to toggle the viewer", () => {
+  const pattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
+  const baseKeys = [
+    ..."abcdefghijklmnopqrstuvwxyz0123456789`=[]\\;'.,/!@#$%^&*()_|~{}:<>?-",
+    "enter", "return", "tab", "space", "backspace", "delete", "insert", "home", "end",
+    "pageUp", "pageDown", "up", "down", "left", "right",
+  ];
+  for (const baseKey of baseKeys) {
+    assert.equal(isCommandViewerShortcut(baseKey), false, baseKey);
+    assert.equal(pattern.test(baseKey), false, baseKey);
+    for (const modifier of ["ctrl", "alt", "shift", "super"]) {
+      const shortcut = `${modifier}+${baseKey}`;
+      assert.equal(isCommandViewerShortcut(shortcut), true, shortcut);
+      assert.equal(pattern.test(shortcut), true, shortcut);
+    }
+  }
+});
+
+test("excluded base keys cannot be configured as viewer shortcuts, even with modifiers", () => {
+  const pattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
+  const excludedKeys = ["escape", "esc", "clear", ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`)];
+  for (const prefix of ["", "ctrl+", "alt+", "shift+", "super+", "ctrl+alt+", "shift+ctrl+alt+super+"]) {
+    for (const baseKey of excludedKeys) {
+      const shortcut = `${prefix}${baseKey}`;
+      assert.equal(isCommandViewerShortcut(shortcut), false, shortcut);
+      assert.equal(pattern.test(shortcut), false, shortcut);
+    }
+  }
 });
 
 test("toggle matching requires the actual combination and ignores key repeat and release without global protocol changes", () => {
