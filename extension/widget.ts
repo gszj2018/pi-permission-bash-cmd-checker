@@ -1,10 +1,10 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Color, Component, KeyId, TUI } from "@earendil-works/pi-tui";
-import type { CommandSnapshot } from "./command-viewer.ts";
-import type { CommandViewerController } from "./command-viewer-controller.ts";
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, shortcutLabel } from "./shortcut.ts";
 import { PALETTES, renderCommandText, sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
-import type { ClassificationState, CommandRecord, RiskLevel } from "./types.ts";
+import type {
+  ClassificationState, CommandRecord, CommandSnapshot, CommandViewerController, RiskLevel,
+} from "./types.ts";
 
 export { sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 

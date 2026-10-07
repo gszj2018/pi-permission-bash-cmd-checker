@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Config, ModelReference } from "./types.ts";
+import type { Config, ConfigLoadResult, ModelReference } from "./types.ts";
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isCommandViewerShortcut } from "./shortcut.ts";
 import { isNonBlankString, isProbability, isRecord } from "./utils.ts";
 
@@ -22,11 +22,6 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
 export type ConfigValidationResult =
   | { readonly status: "valid"; readonly config: Config }
   | { readonly status: "invalid"; readonly issues: readonly string[] };
-
-export type ConfigLoadResult =
-  | { readonly status: "loaded" | "missing"; readonly config: Config }
-  | { readonly status: "invalid"; readonly issues: readonly string[] }
-  | { readonly status: "unreadable" };
 
 type RecordValue = Record<string, unknown>;
 

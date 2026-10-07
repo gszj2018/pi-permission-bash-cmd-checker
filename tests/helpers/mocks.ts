@@ -8,8 +8,7 @@ import {
   isKeyRelease, styleText, stripTerminalSequences, type Component, type KeybindingsManager, type OverlayHandle,
   type OverlayOptions, type TextStyle, type TUI,
 } from "@earendil-works/pi-tui";
-import type { ServiceAccessor } from "../../extension/permissions.ts";
-import type { AnalysisUpdate, CommandAnalyzer, CommandObservation } from "../../extension/types.ts";
+import type { AnalysisUpdate, CommandAnalyzer, CommandObservation, ServiceAccessor } from "../../extension/types.ts";
 
 export function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

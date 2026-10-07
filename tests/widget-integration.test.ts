@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
-import { createCommandViewerController } from "../extension/command-viewer-controller.ts";
+import { createCommandViewerController } from "../extension/command-viewer.ts";
 import { SessionState } from "../extension/state.ts";
 import { createWidgetController, WIDGET_KEY } from "../extension/widget.ts";
 import { MockUi, commandDetails, flushPromises } from "./helpers/mocks.ts";

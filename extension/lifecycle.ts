@@ -1,7 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ConfigLoadResult } from "./config.ts";
-import type { ServiceAccessor } from "./permissions.ts";
-import type { CommandAnalyzer, Config } from "./types.ts";
+import type { CommandAnalyzer, Config, ConfigLoadResult, ServiceAccessor } from "./types.ts";
 
 export type TuiInitializer = (
   pi: ExtensionAPI,

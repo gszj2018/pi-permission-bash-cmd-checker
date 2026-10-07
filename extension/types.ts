@@ -1,5 +1,5 @@
-import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
-import type { KeyId } from "@earendil-works/pi-tui";
+import type { KeyId, TUI } from "@earendil-works/pi-tui";
+import type { AuthorizerVerdict, PermissionsService } from "@gotgenes/pi-permission-system";
 
 export interface ModelReference {
   readonly provider: string;
@@ -33,6 +33,11 @@ export interface Config {
     readonly commandViewerShortcut: KeyId;
   };
 }
+
+export type ConfigLoadResult =
+  | { readonly status: "loaded" | "missing"; readonly config: Config }
+  | { readonly status: "invalid"; readonly issues: readonly string[] }
+  | { readonly status: "unreadable" };
 
 /** Only these labels are sent to the classifier as criteria. */
 export type ClassifierLabel = "safe-ro" | "safe-rw" | "unsafe";
@@ -73,6 +78,24 @@ export type CommandAnalyzer = (
   signal: AbortSignal,
   publish: (update: AnalysisUpdate) => void,
 ) => AnalysisTask;
+
+export type ServiceAccessor = (sessionId: string) => Pick<PermissionsService, "registerAuthorizer"> | undefined;
+
+export interface CommandSnapshot {
+  readonly requestId: string;
+  readonly fullCommand: string;
+}
+
+export interface CommandViewerSource {
+  update(snapshot: CommandSnapshot, owner: TUI): void;
+  clear(): void;
+  dispose(): void;
+}
+
+export interface CommandViewerController {
+  createSource(): CommandViewerSource;
+  dispose(): void;
+}
 
 export interface PermissionOutcome {
   readonly result: "allow" | "deny";

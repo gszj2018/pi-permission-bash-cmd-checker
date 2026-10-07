@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
-import type { CommandViewerSource } from "../extension/command-viewer-controller.ts";
 import { SessionState } from "../extension/state.ts";
-import type { ClassificationState, CommandRecord, ExplanationState, RiskLevel } from "../extension/types.ts";
+import type {
+  ClassificationState, CommandRecord, CommandViewerSource, ExplanationState, RiskLevel,
+} from "../extension/types.ts";
 import {
   CommandWidget, MAX_COMMAND_PREVIEW_LINES, WIDGET_KEY, createWidgetController, sanitizeTerminalText, wrapTerminalText,
 } from "../extension/widget.ts";

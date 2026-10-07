@@ -1,14 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Authorizer, AuthorizerVerdict, PermissionsService } from "@gotgenes/pi-permission-system";
+import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import { extractCommandObservation } from "./command.ts";
-import { createCommandViewerController } from "./command-viewer-controller.ts";
+import { createCommandViewerController } from "./command-viewer.ts";
 import { SessionState } from "./state.ts";
-import type { AnalysisTask, ClassificationResult, CommandAnalyzer, Config } from "./types.ts";
+import type { AnalysisTask, ClassificationResult, CommandAnalyzer, Config, ServiceAccessor } from "./types.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
 import { createWidgetController } from "./widget.ts";
 
 export const AUTHORIZER_NAME = "bash-cmd-checker";
-export type ServiceAccessor = (sessionId: string) => Pick<PermissionsService, "registerAuthorizer"> | undefined;
 
 export interface PermissionRuntime {
   readonly state: SessionState;
