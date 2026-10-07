@@ -6,6 +6,7 @@ import {
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isShortcutPress, shortcutLabel } from "./shortcut.ts";
 import { PALETTES, sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 import type { CommandSnapshot, CommandViewerController } from "./types.ts";
+import { notifyError } from "./utils-pi.ts";
 
 /** One immutable command interaction, independent of the live widget and permission events. */
 export class CommandViewer implements Component {
@@ -114,7 +115,7 @@ interface ViewerInteraction {
   handle?: OverlayHandle;
 }
 
-type ViewerUi = Pick<ExtensionUIContext, "theme" | "onTerminalInput">;
+type ViewerUi = Pick<ExtensionUIContext, "theme" | "onTerminalInput" | "notify">;
 
 /** Owns input and overlay lifetime; command sources cannot close or dispose an open viewer. */
 export function createCommandViewerController(
@@ -138,6 +139,7 @@ export function createCommandViewerController(
       if (slot.interaction === interaction) slot.interaction = undefined;
     } catch {
       // Keep the slot reserved if hiding fails; a later close can retry without creating a second overlay.
+      if (!disposed) notifyError(ui, "Failed to close the command viewer.");
     } finally { interaction.hiding = false; }
   };
 
@@ -154,8 +156,10 @@ export function createCommandViewerController(
       });
       // Own the public handle; ctx.ui.custom's completion may hide an unrelated last-created overlay.
       interaction.handle = tui.showOverlay(interaction.component, { width: "90%", maxHeight: "80%", anchor: "center" });
-    } catch { interaction.closeRequested = true; }
-    finally {
+    } catch {
+      interaction.closeRequested = true;
+      if (!disposed) notifyError(ui, "Failed to open the command viewer.");
+    } finally {
       interaction.mounting = false;
       if (disposed || interaction.closeRequested) closeViewer(interaction);
     }
@@ -183,6 +187,7 @@ export function createCommandViewerController(
     });
   } catch {
     // Input-listener failure must not disable command analysis or permission decisions.
+    if (!disposed) notifyError(ui, "Failed to register command viewer input handling.");
   }
 
   return {

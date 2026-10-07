@@ -157,7 +157,7 @@ test("ready is session-scoped, handles both load orders, and replaces services w
   early.dispose();
 });
 
-test("registration errors are contained and warnings do not expose raw exception details", () => {
+test("registration failures report errors without exposing raw exception details", () => {
   const pi = new MockPi();
   const { ctx, ui } = createContext();
   const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => ({
@@ -166,6 +166,25 @@ test("registration errors are contained and warnings do not expose raw exception
   pi.events.emit("permissions:ready", { sessionId: "session-1" });
   assert.equal(ui.notifications.length, 1);
   assert.equal(ui.notifications[0]?.message.includes("SENSITIVE_REGISTRATION_ERROR"), false);
+  assert.equal(ui.notifications[0]?.type, "error");
+  runtime.dispose();
+});
+
+test("event subscription failures clean up partial setup and report an error", () => {
+  const pi = new MockPi();
+  const { ctx, ui } = createContext();
+  const on = pi.events.on.bind(pi.events);
+  pi.events.on = (channel, handler) => {
+    if (channel === "permissions:ui_prompt") throw new Error("SENSITIVE_EVENT_ERROR");
+    return on(channel, handler);
+  };
+  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => undefined, unavailableAnalyzer);
+  assert.equal(runtime.state.active, false);
+  assert.equal(pi.events.size, 0);
+  assert.equal(ui.inputHandlers.size, 0);
+  assert.deepEqual(ui.notifications, [{
+    message: "[bash-cmd-checker] Permission event setup failed; checker disabled.", type: "error",
+  }]);
   runtime.dispose();
 });
 
@@ -307,6 +326,9 @@ test("permission attachment injects the configured viewer shortcut and isolates 
   assert.equal(ui.overlays.length, 0);
   assert.deepEqual(await service.run(details), { kind: "defer" });
   assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_VIEWER_ERROR"), false);
+  assert.deepEqual(ui.notifications, [{
+    message: "[bash-cmd-checker] Failed to open the command viewer.", type: "error",
+  }]);
   ui.overlayError = undefined;
   ui.input("\u001bm");
   await flushPromises();
@@ -333,6 +355,9 @@ test("an input listener failure cannot disable an unsafe authorization verdict o
   assert.ok(ui.components.has(WIDGET_KEY));
   assert.equal(ui.inputHandlers.size, 0);
   assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_INPUT_ERROR"), false);
+  assert.deepEqual(ui.notifications.filter((notification) => notification.type === "error"), [{
+    message: "[bash-cmd-checker] Failed to register command viewer input handling.", type: "error",
+  }]);
 });
 
 test("widget failures cannot block the gate or escape a background update", async () => {
@@ -345,8 +370,12 @@ test("widget failures cannot block the gate or escape a background update", asyn
   assert.deepEqual(await service.run(details), { kind: "defer" });
   assert.doesNotThrow(() => pi.events.emit("permissions:ui_prompt", promptEvent(details)));
   await flushPromises();
+  assert.ok(ui.notifications.length > 0);
+  assert.ok(ui.notifications.every((notification) => notification.type === "error"
+    && notification.message === "[bash-cmd-checker] Failed to update the command widget."));
+  const notificationCount = ui.notifications.length;
   assert.doesNotThrow(runtime.dispose);
-  assert.equal(ui.notifications.length, 0);
+  assert.equal(ui.notifications.length, notificationCount);
 });
 
 test("malformed events and unsupported authorizer payloads cannot create command records", async (t) => {
@@ -494,7 +523,7 @@ test("TUI initialization uses the explicitly supplied analysis dependency", asyn
   dispose();
 });
 
-test("invalid config and missing dependency each produce only a fixed startup warning", async () => {
+test("invalid config stays a warning while a missing dependency produces a fixed startup error", async () => {
   for (const failure of ["config", "accessor"] as const) {
     const pi = new MockPi();
     const { ctx, ui } = createContext();
@@ -507,6 +536,7 @@ test("invalid config and missing dependency each produce only a fixed startup wa
     });
     assert.equal(ui.notifications.length, 1);
     assert.equal(/SENSITIVE/.test(ui.notifications[0]!.message), false);
+    assert.equal(ui.notifications[0]?.type, failure === "config" ? "warning" : "error");
     assert.equal(pi.events.size, 0);
   }
 });

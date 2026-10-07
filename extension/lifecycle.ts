@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { attachPermissions } from "./permissions.ts";
 import type { CommandAnalyzer, Config, ConfigLoadResult, ServiceAccessor } from "./types.ts";
+import { notifyError, notifyWarning } from "./utils-pi.ts";
 
 export type TuiInitializer = (
   pi: ExtensionAPI,
@@ -13,10 +14,6 @@ export interface TuiDependencies {
   loadAccessor(): Promise<ServiceAccessor>;
   createAnalyzer(ctx: ExtensionContext, config: Config): CommandAnalyzer;
   attachPermissions: typeof attachPermissions;
-}
-
-function notify(ctx: ExtensionContext, message: string): void {
-  try { ctx.ui.notify(`[bash-cmd-checker] ${message}`, "warning"); } catch {}
 }
 
 /** Factory-time registration is limited to mode detection; non-TUI sessions never initialize checker features. */
@@ -46,7 +43,7 @@ export function registerLifecycle(pi: ExtensionAPI, initialize: TuiInitializer):
       else cleanup = dispose;
     } catch {
       if (!controller.signal.aborted) {
-        notify(ctx, "Initialization failed; checker disabled.");
+        notifyError(ctx.ui, "Initialization failed; checker disabled.");
       }
       stopGeneration();
     }
@@ -64,17 +61,17 @@ export async function initializeTui(
   if (signal.aborted || ctx.mode !== "tui") return noop;
   let loaded: ConfigLoadResult;
   try { loaded = await dependencies.loadConfig(); } catch {
-    if (!signal.aborted) notify(ctx, "Configuration could not be loaded; checker disabled.");
+    if (!signal.aborted) notifyError(ctx.ui, "Configuration could not be loaded; checker disabled.");
     return noop;
   }
   if (signal.aborted) return noop;
   if (loaded.status === "invalid" || loaded.status === "unreadable") {
-    notify(ctx, "Invalid or unreadable configuration; checker disabled.");
+    notifyWarning(ctx.ui, "Invalid or unreadable configuration; checker disabled.");
     return noop;
   }
   let getService: ServiceAccessor;
   try { getService = await dependencies.loadAccessor(); } catch {
-    if (!signal.aborted) notify(ctx, "Permission package could not be imported; checker disabled.");
+    if (!signal.aborted) notifyError(ctx.ui, "Permission package could not be imported; checker disabled.");
     return noop;
   }
   if (signal.aborted) return noop;

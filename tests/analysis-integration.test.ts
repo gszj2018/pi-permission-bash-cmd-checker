@@ -214,15 +214,21 @@ test("a widget mount failure cannot change automatic denial, and late explanatio
   const verdict = await app.service.run(details);
   assert.equal(verdict.kind, "deny");
   assert.deepEqual(app.runtime.state.get(details.requestId)?.verdict, verdict);
-  assert.equal(app.ui.notifications.length, 1);
-  assert.equal(app.ui.notifications[0]?.message.includes("SENSITIVE"), false);
+  const warnings = app.ui.notifications.filter((notification) => notification.type === "warning");
+  const errors = app.ui.notifications.filter((notification) => notification.type === "error");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.message, "[bash-cmd-checker] Blocked a bash command assessed as dangerous.");
+  assert.ok(errors.length > 0);
+  assert.ok(errors.every((notification) => notification.message === "[bash-cmd-checker] Failed to update the command widget."));
+  assert.equal(JSON.stringify(app.ui.notifications).includes("SENSITIVE"), false);
+  const notificationCount = app.ui.notifications.length;
   app.ctx.ui.setWidget = setWidget;
   explanation.resolve(explanationResponse("Explanation after UI recovery."));
   await flushPromises();
   assert.ok(app.ui.text(WIDGET_KEY).includes("Explanation after UI recovery."));
   assert.ok(app.ui.text(WIDGET_KEY).includes("⛔  Dangerous"));
   assert.deepEqual(await app.service.run(details), verdict);
-  assert.equal(app.ui.notifications.length, 1);
+  assert.equal(app.ui.notifications.length, notificationCount);
 });
 
 test("disabled, unavailable and failed classification defer to the rest of the chain while explanations still complete", async (t) => {

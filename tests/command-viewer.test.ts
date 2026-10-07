@@ -319,6 +319,9 @@ test("programmatic close affects only the owned viewer and preserves sources and
   assert.equal(first.ui.overlays.length, 2);
   assert.ok(first.ui.overlayText().includes("first command"));
   assert.equal(JSON.stringify(first.ui.notifications).includes("SENSITIVE_HIDE_ERROR"), false);
+  assert.deepEqual(first.ui.notifications, [{
+    message: "[bash-cmd-checker] Failed to close the command viewer.", type: "error",
+  }]);
 });
 
 test("programmatic close during creation closes the returned handle without disposing the controller", (t) => {
@@ -432,6 +435,9 @@ test("a failed hide retains the single-viewer reservation until a later close su
   assert.equal(ui.overlays.length, 1);
   assert.equal(ui.overlayHistory.length, 1);
   assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_HIDE_ERROR"), false);
+  assert.deepEqual(ui.notifications, [{
+    message: "[bash-cmd-checker] Failed to close the command viewer.", type: "error",
+  }]);
   ui.input(toggle);
   assert.equal(ui.overlays.length, 0);
   assert.equal(ui.overlayHistory.length, 1);

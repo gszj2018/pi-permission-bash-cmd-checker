@@ -123,4 +123,20 @@ test("initialization failure is reported once without raw details and cleanup re
   assert.equal(pi.count("session_shutdown"), 0);
   assert.equal(ui.notifications.length, 1);
   assert.equal(ui.notifications[0]?.message.includes("SENSITIVE_FAILURE"), false);
+  assert.equal(ui.notifications[0]?.type, "error");
+});
+
+test("a thrown config loader reports an error without continuing initialization", async () => {
+  const pi = new MockPi();
+  const { ctx, ui } = createContext();
+  const cleanup = await initializeTui(pi.api, ctx, new AbortController().signal, {
+    loadConfig: async () => { throw new Error("SENSITIVE_CONFIG_ERROR"); },
+    loadAccessor: async () => { assert.fail("Must not load the accessor after config failure."); },
+    createAnalyzer: () => { assert.fail("Must not create an analyzer after config failure."); },
+    attachPermissions: () => { assert.fail("Must not attach after config failure."); },
+  });
+  cleanup();
+  assert.deepEqual(ui.notifications, [{
+    message: "[bash-cmd-checker] Configuration could not be loaded; checker disabled.", type: "error",
+  }]);
 });

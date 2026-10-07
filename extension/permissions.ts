@@ -7,14 +7,11 @@ import type {
   AnalysisTask, ClassificationResult, CommandAnalyzer, Config, PermissionRuntime, ServiceAccessor,
   SessionStateContract,
 } from "./types.ts";
+import { notifyError, notifyWarning } from "./utils-pi.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
 import { createWidgetController } from "./widget.ts";
 
 export const AUTHORIZER_NAME = "bash-cmd-checker";
-
-function notify(ctx: ExtensionContext, message: string): void {
-  try { ctx.ui.notify(`[bash-cmd-checker] ${message}`, "warning"); } catch {}
-}
 
 /** Attach synchronously after configuration and the accessor have loaded. No event callback imports modules. */
 export function attachPermissions(
@@ -30,7 +27,7 @@ export function attachPermissions(
   if (signal?.aborted || ctx.mode !== "tui") return inert();
   const sessionId = ctx.sessionManager.getSessionId();
   if (!isNonBlankString(sessionId)) {
-    notify(ctx, "Session identity unavailable; checker disabled.");
+    notifyWarning(ctx.ui, "Session identity unavailable; checker disabled.");
     return inert();
   }
   const viewer = createCommandViewerController(ctx.ui, config.widget.commandViewerShortcut);
@@ -48,7 +45,7 @@ export function attachPermissions(
       if (visible) widget.show(visible);
       else widget.hide();
     } catch {
-      // Rendering cannot throw into the permission gate or expose the command via an error log.
+      if (state.active) notifyError(ctx.ui, "Failed to update the command widget.");
     }
   };
 
@@ -87,7 +84,7 @@ export function attachPermissions(
       if (state.settleVerdict(record, decision)) {
         // Missing permission prompts still track the settled verdict; automatic denial never re-shows a covered widget.
         if (state.visible?.observation === record.observation) refresh();
-        if (decision.kind === "deny") notify(ctx, "Blocked a bash command assessed as dangerous.");
+        if (decision.kind === "deny") notifyWarning(ctx.ui, "Blocked a bash command assessed as dangerous.");
       }
       resolveVerdict(decision);
     };
@@ -135,7 +132,7 @@ export function attachPermissions(
       releaseAuthorizer();
       if (!warnedRegistration) {
         warnedRegistration = true;
-        notify(ctx, "Authorizer registration failed; check for duplicate loading or a conflicting name.");
+        notifyError(ctx.ui, "Authorizer registration failed; check for duplicate loading or a conflicting name.");
       }
     }
   };
@@ -176,7 +173,7 @@ export function attachPermissions(
     return { state, dispose };
   } catch {
     dispose();
-    notify(ctx, "Permission event setup failed; checker disabled.");
+    notifyError(ctx.ui, "Permission event setup failed; checker disabled.");
     return { state, dispose };
   }
 }
