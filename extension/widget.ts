@@ -9,7 +9,7 @@ import type {
 export { sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 
 export const WIDGET_KEY = "bash-cmd-checker";
-export const MAX_COMMAND_PREVIEW_LINES = 8;
+export const MAX_COMMAND_PREVIEW_LINES = 4;
 
 const RISK_TEXT: Record<RiskLevel, string> = {
   "safe-ro": "✅  Likely Safe (RO)",
@@ -67,7 +67,7 @@ export class CommandWidget implements Component {
       }
     };
     const status = record.decision ? `Completed: ${record.decision.result} (${record.decision.resolution})`
-      : "Awaiting approval";
+      : record.verdictSettled ? "Awaiting approval" : "Assessing command…";
     add(`Bash command · Request: ${record.observation.requestId} · ${status}`);
     const requester = record.observation.requester;
     if (requester.forwarded) {

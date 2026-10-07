@@ -23,7 +23,7 @@ function decision(requestId: string, result: "allow" | "deny" = "allow") {
   return { requestId, result, resolution: result === "allow" ? "user_approved" : "user_denied" };
 }
 
-test("deferred requests wait only for classification and mount only after ui_prompt", async (t) => {
+test("deferred requests wait only for classification and display their command before the prompt", async (t) => {
   const pending = deferred<void>();
   let publish!: (update: AnalysisUpdate) => void;
   let signal!: AbortSignal;
@@ -40,9 +40,12 @@ test("deferred requests wait only for classification and mount only after ui_pro
   assert.deepEqual(await app.service.run(details), { kind: "defer" });
   await flushPromises();
   assert.equal(starts, 1);
-  assert.equal(app.ui.components.size, 0);
+  assert.equal(app.ui.components.size, 1);
+  assert.ok(app.ui.text(WIDGET_KEY).includes("✅  Likely Safe (RO)"));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Awaiting approval"));
   assert.deepEqual(await app.service.run(details), { kind: "defer" });
   assert.equal(starts, 1);
+  assert.equal(app.ui.mounts.length, 1);
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   assert.ok(app.ui.text(WIDGET_KEY).includes(details.payload.evidence[0]!.text));
   assert.ok(app.ui.text(WIDGET_KEY).includes("Analyzing command…"));

@@ -74,9 +74,9 @@ test("command backgrounds preserve complete sanitized text, spaces and graphemes
   assert.equal(current.observation.fullCommand, source);
 });
 
-test("command previews cap wrapped content at eight lines without altering the snapshot or other analysis", () => {
+test("command previews cap wrapped content at four lines without altering the snapshot or other analysis", () => {
   for (const appearance of ["dark", "light"] as const) {
-    for (const count of [7, 8, 9, 20]) {
+    for (const count of [3, 4, 5, 20]) {
       const source = Array.from({ length: count }, (_, index) => `printf '${index}'`).join("\n");
       const current = record(source);
       const widget = new CommandWidget({ ...current, classification: classified("unsafe"),
@@ -84,9 +84,9 @@ test("command previews cap wrapped content at eight lines without altering the s
       const lines = widget.render(200);
       const background = appearance === "dark" ? "35;55;80" : "220;235;255";
       const command = lines.filter((line) => line.includes(`\u001b[48;2;${background}m`));
-      assert.deepEqual(command.map(stripTerminalSequences), source.split("\n").slice(0, 8));
+      assert.deepEqual(command.map(stripTerminalSequences), source.split("\n").slice(0, 4));
       const hint = lines.find((line) => stripTerminalSequences(line).startsWith("Command truncated."));
-      assert.equal(hint !== undefined, count > 8);
+      assert.equal(hint !== undefined, count > 4);
       if (hint) {
         assert.ok(stripTerminalSequences(hint).includes("Alt+m"));
         assert.equal(stripTerminalSequences(hint).includes("Alt+c"), false);
@@ -102,7 +102,7 @@ test("command previews cap wrapped content at eight lines without altering the s
   }
   const widget = new CommandWidget(record("x".repeat(90)), () => mockTheme());
   const narrow = widget.render(10);
-  assert.equal(narrow.filter((line) => line.includes("\u001b[48;2;35;55;80m")).length, 8);
+  assert.equal(narrow.filter((line) => line.includes("\u001b[48;2;35;55;80m")).length, 4);
   assert.ok(narrow.map(stripTerminalSequences).join("").includes("Command truncated."));
   assert.equal(widget.render(200).map(stripTerminalSequences).join("\n").includes("Command truncated."), false);
 });
@@ -164,14 +164,22 @@ test("all non-assessment notices are yellow, unadorned and distinct from unknown
 
 test("pending risk shows progress without a risk badge while explanation and permission status remain visible", () => {
   const widget = new CommandWidget(record(), () => mockTheme());
+  const statusOf = (): string => {
+    const line = widget.render(200).map(stripTerminalSequences)
+      .find((item) => item.startsWith("Bash command · Request: request-1 · "));
+    assert.ok(line);
+    return line;
+  };
   let text = widget.render(200).map(stripTerminalSequences).join("\n");
   assert.ok(text.includes("Analyzing command…"));
   assert.ok(text.includes("Assessing command risk…"));
-  assert.ok(text.includes("Awaiting approval"));
+  assert.equal(statusOf(), "Bash command · Request: request-1 · Assessing command…");
   assert.equal(/Risk assessment|Likely Safe|Dangerous|Unknown/.test(text), false);
-  widget.setRecord({ ...record(), decision: { result: "allow", resolution: "user_approved" } });
+  widget.setRecord({ ...record(), verdictSettled: true });
+  assert.equal(statusOf(), "Bash command · Request: request-1 · Awaiting approval");
+  widget.setRecord({ ...record(), verdictSettled: true, decision: { result: "allow", resolution: "user_approved" } });
+  assert.equal(statusOf(), "Bash command · Request: request-1 · Completed: allow (user_approved)");
   text = widget.render(200).map(stripTerminalSequences).join("\n");
-  assert.ok(text.includes("Completed: allow (user_approved)"));
   assert.ok(text.includes("Analyzing command…"));
   widget.setRecord({ ...record(), explanation: { status: "unavailable" } });
   assert.ok(widget.render(200).map(stripTerminalSequences).includes("Command explanation unavailable."));

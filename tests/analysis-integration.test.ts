@@ -18,7 +18,7 @@ function setup(config: Config = DEFAULT_CONFIG) {
 
 const blockingConfig = { ...DEFAULT_CONFIG, autoBlockUnsafe: true };
 
-test("the gate waits for classification, deduplicates pending requests and never waits for the LLM", async (t) => {
+test("the gate waits for classification while displaying the command immediately, deduplicating pending requests and never waiting for the LLM", async (t) => {
   const app = setup();
   t.after(app.runtime.dispose);
   const classifier = deferred<unknown>();
@@ -34,12 +34,15 @@ test("the gate waits for classification, deduplicates pending requests and never
   assert.equal(settled, false);
   assert.equal(app.models.classifications.length, 1);
   assert.equal(app.models.streams.length, 1);
-  assert.equal(app.ui.mounts.length, 0);
+  assert.equal(app.ui.mounts.length, 1);
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Assessing command…"));
   classifier.resolve(riskResponse());
   assert.deepEqual(await first, { kind: "defer" });
   assert.deepEqual(await duplicate, { kind: "defer" });
   assert.equal(app.runtime.state.get(details.requestId)?.explanation.status, "pending");
   assert.equal(app.runtime.state.get(details.requestId)?.verdictSettled, true);
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Awaiting approval"));
+  assert.equal(app.ui.mounts.length, 1);
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   assert.ok(app.ui.text(WIDGET_KEY).includes("✅  Likely Safe (RO)"));
   assert.ok(app.ui.text(WIDGET_KEY).includes("Analyzing command…"));
@@ -107,7 +110,7 @@ test("auto-blocking denies only a validated threshold-unsafe response when expli
       assert.equal(verdict.kind, autoBlockUnsafe && dangerous ? "deny" : "defer");
       assert.equal(app.ui.notifications.length, autoBlockUnsafe && dangerous ? 1 : 0);
       assert.deepEqual(app.runtime.state.get(details.requestId)?.verdict, verdict);
-      assert.equal(app.ui.mounts.length, verdict.kind === "deny" ? 1 : 0);
+      assert.equal(app.ui.mounts.length, 1);
       if (verdict.kind === "deny") {
         assert.ok(app.ui.text(WIDGET_KEY).includes("⛔  Dangerous"));
         assert.ok(app.ui.text(WIDGET_KEY).includes("Prints two values."));
@@ -118,7 +121,7 @@ test("auto-blocking denies only a validated threshold-unsafe response when expli
   }
 });
 
-test("automatic denial shows its widget, keeps late explanations and notifies once per request", async (t) => {
+test("automatic denial keeps the widget shown before classification, late explanations and one notification per request", async (t) => {
   const app = setup(blockingConfig);
   t.after(app.runtime.dispose);
   const first = commandDetails("visible", "printf 'visible command'");
@@ -131,6 +134,8 @@ test("automatic denial shows its widget, keeps late explanations and notifies on
   const denied = commandDetails("denied", "printf 'another harmless test command'");
   const one = app.service.run(denied);
   const two = app.service.run(denied);
+  assert.ok(app.ui.text(WIDGET_KEY).includes(denied.payload.evidence[0]!.text));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Assessing command…"));
   const verdict = await one;
   assert.equal(verdict.kind, "deny");
   assert.deepEqual(await two, verdict);
@@ -159,7 +164,7 @@ test("automatic denial shows its widget, keeps late explanations and notifies on
 });
 
 test("late explanations, decisions and duplicate denials cannot reclaim a covered or hidden widget", async (t) => {
-  for (const coverage of ["prompt", "automatic-denial", "unobserved"] as const) {
+  for (const coverage of ["covered", "prompt", "unobserved"] as const) {
     const app = setup(blockingConfig);
     t.after(app.runtime.dispose);
     const explanation = deferred<unknown>();
@@ -170,7 +175,7 @@ test("late explanations, decisions and duplicate denials cannot reclaim a covere
     assert.equal(verdict.kind, "deny", coverage);
     assert.ok(app.ui.text(WIDGET_KEY).includes("Request: denied"), coverage);
     app.models.llmResult = async () => explanationResponse("Other request explanation.");
-    app.models.classifierResult = async () => riskResponse(coverage === "automatic-denial" ? 1 : 0.05);
+    app.models.classifierResult = async () => riskResponse(coverage === "covered" ? 1 : 0.05);
     const other = commandDetails("other", "printf 'other request'");
     await app.service.run(other);
     if (coverage === "prompt") app.pi.events.emit("permissions:ui_prompt", promptEvent(other));
@@ -190,7 +195,7 @@ test("late explanations, decisions and duplicate denials cannot reclaim a covere
     assert.equal(app.ui.text(WIDGET_KEY), coveredText, coverage);
     assert.deepEqual(await app.service.run(denied), verdict, coverage);
     assert.equal(app.ui.text(WIDGET_KEY), coveredText, coverage);
-    assert.equal(app.ui.notifications.length, coverage === "automatic-denial" ? 2 : 1, coverage);
+    assert.equal(app.ui.notifications.length, coverage === "covered" ? 2 : 1, coverage);
     assert.equal(app.models.classifications.length, 2, coverage);
     assert.equal(app.models.streams.length, 2, coverage);
     assert.equal(app.clock.pending, 0, coverage);

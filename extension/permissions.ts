@@ -62,6 +62,9 @@ export function attachPermissions(
     if (existing) return existing.verdict;
     const record = state.observe(observation, config.classifier.model === null);
     if (!record) return { kind: "defer" };
+    // The command is displayed as soon as it enters the checker, before classification starts.
+    state.show(observation.requestId);
+    refresh();
     const controller = new AbortController();
     const publish: Parameters<CommandAnalyzer>[2] = (update) => {
       if (controller.signal.aborted || !state.publish(record, update)) return;
@@ -81,11 +84,10 @@ export function attachPermissions(
         && result.risk === "unsafe"
         ? { kind: "deny", reason: "Bash command blocked by the configured unsafe-risk policy." }
         : { kind: "defer" };
-      if (state.settleVerdict(record, decision) && decision.kind === "deny") {
-        // Automatic denial has no permission prompt, but still displays the cached analysis.
-        state.show(observation.requestId);
-        refresh();
-        notify(ctx, "Blocked a bash command assessed as dangerous.");
+      if (state.settleVerdict(record, decision)) {
+        // Missing permission prompts still track the settled verdict; automatic denial never re-shows a covered widget.
+        if (state.visible?.identity === record.identity) refresh();
+        if (decision.kind === "deny") notify(ctx, "Blocked a bash command assessed as dangerous.");
       }
       resolveVerdict(decision);
     };

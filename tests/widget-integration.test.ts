@@ -169,7 +169,7 @@ test("reported repeats and releases of closing keys cannot reach the underlying 
   }
 });
 
-test("keyboard scrolling reaches the entire captured command beyond the eight-line preview", async (t) => {
+test("keyboard scrolling reaches the entire captured command beyond the four-line preview", async (t) => {
   const { ui, controller } = setup(t);
   const source = Array.from({ length: 70 }, (_, index) => `printf 'line-${index}'`).join("\n");
   controller.show(record("long", source));
