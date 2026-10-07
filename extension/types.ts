@@ -1,3 +1,5 @@
+import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
+
 export interface ModelReference {
   readonly provider: string;
   readonly id: string;
@@ -28,6 +30,46 @@ export interface Config {
 export type ClassifierLabel = "safe-ro" | "safe-rw" | "unsafe";
 /** Unknown is produced locally when a valid answer fails the configured thresholds. */
 export type RiskLevel = ClassifierLabel | "unknown";
+
+export type ExplanationState =
+  | { readonly status: "pending" }
+  | { readonly status: "complete"; readonly text: string }
+  | { readonly status: "unavailable" };
+
+export type ClassificationState =
+  | { readonly status: "pending" | "disabled" | "unavailable" | "failed" | "timed-out" | "invalid-response" }
+  | {
+    readonly status: "complete";
+    readonly risk: RiskLevel;
+    readonly probabilities: Readonly<Record<ClassifierLabel, number>>;
+    readonly confidence: number;
+  };
+
+export type AnalysisUpdate =
+  | { readonly kind: "explanation"; readonly value: ExplanationState }
+  | { readonly kind: "classification"; readonly value: ClassificationState };
+
+/** Phase-two background seam; replaced with bounded classification arbitration in phase three. */
+export type CommandAnalyzer = (
+  command: CommandObservation,
+  signal: AbortSignal,
+  publish: (update: AnalysisUpdate) => void,
+) => Promise<void>;
+
+export interface PermissionOutcome {
+  readonly result: "allow" | "deny";
+  readonly resolution: string;
+}
+
+export interface CommandRecord {
+  readonly identity: symbol;
+  readonly observation: CommandObservation;
+  readonly explanation: ExplanationState;
+  readonly classification: ClassificationState;
+  readonly verdict: AuthorizerVerdict;
+  readonly prompted: boolean;
+  readonly decision?: PermissionOutcome;
+}
 
 export interface CommandObservation {
   readonly requestId: string;
