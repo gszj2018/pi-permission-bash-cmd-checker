@@ -1,8 +1,10 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
-import type { AnalysisUpdate, CommandObservation, CommandRecord, PermissionOutcome } from "./types.ts";
+import type {
+  AnalysisUpdate, CommandObservation, CommandRecord, PermissionOutcome, SessionStateContract,
+} from "./types.ts";
 
 /** One active session generation. Results are retained until this store is closed. */
-export class SessionState {
+export class SessionState implements SessionStateContract {
   readonly generation = Symbol("bash-cmd-checker-session");
   private readonly records = new Map<string, CommandRecord>();
   private visibleRequestId: string | undefined;

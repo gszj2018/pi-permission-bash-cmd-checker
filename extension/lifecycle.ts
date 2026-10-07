@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { attachPermissions } from "./permissions.ts";
 import type { CommandAnalyzer, Config, ConfigLoadResult, ServiceAccessor } from "./types.ts";
 
 export type TuiInitializer = (
@@ -11,14 +12,14 @@ export interface TuiDependencies {
   loadConfig(): Promise<ConfigLoadResult>;
   loadAccessor(): Promise<ServiceAccessor>;
   createAnalyzer(ctx: ExtensionContext, config: Config): CommandAnalyzer;
-  attachPermissions: typeof import("./permissions.ts").attachPermissions;
+  attachPermissions: typeof attachPermissions;
 }
 
 function notify(ctx: ExtensionContext, message: string): void {
   try { ctx.ui.notify(`[bash-cmd-checker] ${message}`, "warning"); } catch {}
 }
 
-/** Factory-time registration is limited to mode detection; non-TUI sessions never load feature modules. */
+/** Factory-time registration is limited to mode detection; non-TUI sessions never initialize checker features. */
 export function registerLifecycle(pi: ExtensionAPI, initialize: TuiInitializer): void {
   let stop: (() => void) | undefined;
   pi.on("session_start", async (_event, ctx) => {

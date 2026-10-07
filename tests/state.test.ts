@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { extractCommandObservation } from "../extension/command.ts";
 import { SessionState } from "../extension/state.ts";
+import type { SessionStateContract } from "../extension/types.ts";
 import { commandDetails } from "./helpers/mocks.ts";
 
-function observe(state: SessionState, id = "request-1", disabled = false) {
+function observe(state: SessionStateContract, id = "request-1", disabled = false) {
   const observation = extractCommandObservation(commandDetails(id));
   assert.ok(observation);
   const record = state.observe(observation, disabled);

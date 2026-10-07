@@ -81,6 +81,27 @@ export type CommandAnalyzer = (
 
 export type ServiceAccessor = (sessionId: string) => Pick<PermissionsService, "registerAuthorizer"> | undefined;
 
+/** Public session state contract, independent of storage and concrete runtime classes. */
+export interface SessionStateContract {
+  readonly generation: symbol;
+  readonly active: boolean;
+  readonly size: number;
+  readonly visible: CommandRecord | undefined;
+  get(requestId: string): CommandRecord | undefined;
+  observe(observation: CommandObservation, classificationDisabled?: boolean): CommandRecord | undefined;
+  publish(record: CommandRecord, update: AnalysisUpdate): boolean;
+  settleVerdict(record: CommandRecord, verdict: AuthorizerVerdict): boolean;
+  show(requestId: string): CommandRecord | undefined;
+  hide(): void;
+  decide(requestId: string, outcome: PermissionOutcome): boolean;
+  close(): void;
+}
+
+export interface PermissionRuntime {
+  readonly state: SessionStateContract;
+  dispose(): void;
+}
+
 export interface CommandSnapshot {
   readonly requestId: string;
   readonly fullCommand: string;

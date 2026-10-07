@@ -3,16 +3,14 @@ import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-syst
 import { extractCommandObservation } from "./command.ts";
 import { createCommandViewerController } from "./command-viewer.ts";
 import { SessionState } from "./state.ts";
-import type { AnalysisTask, ClassificationResult, CommandAnalyzer, Config, ServiceAccessor } from "./types.ts";
+import type {
+  AnalysisTask, ClassificationResult, CommandAnalyzer, Config, PermissionRuntime, ServiceAccessor,
+  SessionStateContract,
+} from "./types.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
 import { createWidgetController } from "./widget.ts";
 
 export const AUTHORIZER_NAME = "bash-cmd-checker";
-
-export interface PermissionRuntime {
-  readonly state: SessionState;
-  dispose(): void;
-}
 
 function notify(ctx: ExtensionContext, message: string): void {
   try { ctx.ui.notify(`[bash-cmd-checker] ${message}`, "warning"); } catch {}
@@ -27,7 +25,7 @@ export function attachPermissions(
   analyzer: CommandAnalyzer,
   signal?: AbortSignal,
 ): PermissionRuntime {
-  const state = new SessionState();
+  const state: SessionStateContract = new SessionState();
   const inert = (): PermissionRuntime => { state.close(); return { state, dispose() {} }; };
   if (signal?.aborted || ctx.mode !== "tui") return inert();
   const sessionId = ctx.sessionManager.getSessionId();
