@@ -36,8 +36,10 @@ export type ExplanationState =
   | { readonly status: "complete"; readonly text: string }
   | { readonly status: "unavailable" };
 
-export type ClassificationState =
-  | { readonly status: "pending" | "disabled" | "unavailable" | "failed" | "timed-out" | "invalid-response" }
+export type ExplanationResult = Exclude<ExplanationState, { readonly status: "pending" }>;
+
+export type ClassificationResult =
+  | { readonly status: "disabled" | "unavailable" | "failed" | "timed-out" | "invalid-response" }
   | {
     readonly status: "complete";
     readonly risk: RiskLevel;
@@ -49,12 +51,20 @@ export type AnalysisUpdate =
   | { readonly kind: "explanation"; readonly value: ExplanationState }
   | { readonly kind: "classification"; readonly value: ClassificationState };
 
-/** Phase-two background seam; replaced with bounded classification arbitration in phase three. */
+export type ClassificationState = { readonly status: "pending" } | ClassificationResult;
+
+export interface AnalysisTask {
+  /** The only result the Authorizer waits for. */
+  readonly classification: Promise<ClassificationResult>;
+  /** Both bounded tasks have ended; used for cleanup, never for authorization. */
+  readonly done: Promise<void>;
+}
+
 export type CommandAnalyzer = (
   command: CommandObservation,
   signal: AbortSignal,
   publish: (update: AnalysisUpdate) => void,
-) => Promise<void>;
+) => AnalysisTask;
 
 export interface PermissionOutcome {
   readonly result: "allow" | "deny";
@@ -67,6 +77,7 @@ export interface CommandRecord {
   readonly explanation: ExplanationState;
   readonly classification: ClassificationState;
   readonly verdict: AuthorizerVerdict;
+  readonly verdictSettled: boolean;
   readonly prompted: boolean;
   readonly decision?: PermissionOutcome;
 }

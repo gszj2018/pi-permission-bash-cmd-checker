@@ -31,6 +31,25 @@ test("state deduplicates only request IDs, retains all completed records and kee
   assert.equal(state.decide("request-1", { result: "deny", resolution: "user_denied" }), false);
 });
 
+test("final verdicts are immutable, settle once and cannot cross a session generation", () => {
+  const state = new SessionState();
+  const record = observe(state);
+  assert.equal(record.verdictSettled, false);
+  assert.equal(state.settleVerdict(record, { kind: "deny", reason: "Fixed policy reason." }), true);
+  const settled = state.get("request-1")!;
+  assert.equal(settled.verdictSettled, true);
+  assert.deepEqual(settled.verdict, { kind: "deny", reason: "Fixed policy reason." });
+  assert.ok(Object.isFrozen(settled.verdict));
+  assert.equal(state.settleVerdict(record, { kind: "defer" }), false);
+  assert.equal(record.verdictSettled, false);
+  assert.deepEqual(record.verdict, { kind: "defer" });
+  const fresh = new SessionState();
+  observe(fresh);
+  assert.equal(fresh.settleVerdict(record, { kind: "deny", reason: "Stale policy reason." }), false);
+  state.close();
+  assert.equal(state.settleVerdict(record, { kind: "defer" }), false);
+});
+
 test("captured identities permit independent late results without changing the visible request", () => {
   const state = new SessionState();
   const first = observe(state);

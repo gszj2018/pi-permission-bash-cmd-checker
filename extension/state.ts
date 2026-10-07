@@ -1,3 +1,4 @@
+import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import type { AnalysisUpdate, CommandObservation, CommandRecord, PermissionOutcome } from "./types.ts";
 
 /** One active session generation. Results are retained until this store is closed. */
@@ -25,6 +26,7 @@ export class SessionState {
       explanation: Object.freeze({ status: "pending" as const }),
       classification: Object.freeze({ status: classificationDisabled ? "disabled" as const : "pending" as const }),
       verdict: Object.freeze({ kind: "defer" as const }),
+      verdictSettled: false,
       prompted: false,
     });
     this.records.set(observation.requestId, record);
@@ -47,6 +49,16 @@ export class SessionState {
         : Object.freeze({ ...update.value });
       this.records.set(record.observation.requestId, Object.freeze({ ...current, classification }));
     }
+    return true;
+  }
+
+  /** A final verdict cannot be revised by a late classification or a repeated authorization call. */
+  settleVerdict(record: CommandRecord, verdict: AuthorizerVerdict): boolean {
+    const current = this.records.get(record.observation.requestId);
+    if (this.closed || current?.identity !== record.identity || current.verdictSettled) return false;
+    this.records.set(record.observation.requestId, Object.freeze({
+      ...current, verdict: Object.freeze({ ...verdict }), verdictSettled: true,
+    }));
     return true;
   }
 

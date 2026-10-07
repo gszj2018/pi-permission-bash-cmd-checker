@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ConfigLoadResult } from "./config.ts";
 import type { ServiceAccessor } from "./permissions.ts";
-import type { CommandAnalyzer } from "./types.ts";
+import type { CommandAnalyzer, Config } from "./types.ts";
 
 export type TuiInitializer = (
   pi: ExtensionAPI,
@@ -12,7 +12,7 @@ export type TuiInitializer = (
 export interface TuiDependencies {
   loadConfig(): Promise<ConfigLoadResult>;
   loadAccessor(): Promise<ServiceAccessor>;
-  analyzer: CommandAnalyzer;
+  createAnalyzer(ctx: ExtensionContext, config: Config): CommandAnalyzer;
   attachPermissions: typeof import("./permissions.ts").attachPermissions;
 }
 
@@ -79,5 +79,6 @@ export async function initializeTui(
     return noop;
   }
   if (signal.aborted) return noop;
-  return dependencies.attachPermissions(pi, ctx, loaded.config, getService, dependencies.analyzer, signal).dispose;
+  const analyzer = dependencies.createAnalyzer(ctx, loaded.config);
+  return dependencies.attachPermissions(pi, ctx, loaded.config, getService, analyzer, signal).dispose;
 }

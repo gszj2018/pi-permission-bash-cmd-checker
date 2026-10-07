@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_CONFIG } from "../extension/config.ts";
 import { initializeTui, registerLifecycle } from "../extension/lifecycle.ts";
 import { SessionState } from "../extension/state.ts";
-import { MockPi, createContext, deferred, flushPromises } from "./helpers/mocks.ts";
+import { MockPi, createContext, deferred, flushPromises, unavailableAnalyzer } from "./helpers/mocks.ts";
 
 test("lifecycle does not initialize features in non-TUI modes, even when RPC reports hasUI", async () => {
   for (const mode of ["rpc", "json", "print"] as const) {
@@ -26,13 +26,17 @@ test("TUI initialization forwards explicit dependencies to the injected permissi
   const controller = new AbortController();
   const state = new SessionState();
   const accessor = () => undefined;
-  const analyzer = async (): Promise<void> => {};
+  const analyzer = unavailableAnalyzer;
   let attached = 0;
   let disposed = 0;
   const cleanup = await initializeTui(pi.api, ctx, controller.signal, {
     loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
     loadAccessor: async () => accessor,
-    analyzer,
+    createAnalyzer(context, config) {
+      assert.equal(context, ctx);
+      assert.equal(config, DEFAULT_CONFIG);
+      return analyzer;
+    },
     attachPermissions(api, context, config, getService, analyze, signal) {
       attached++;
       assert.equal(api, pi.api);

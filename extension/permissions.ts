@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Authorizer, PermissionsService } from "@gotgenes/pi-permission-system";
+import type { Authorizer, AuthorizerVerdict, PermissionsService } from "@gotgenes/pi-permission-system";
 import { extractCommandObservation } from "./command.ts";
 import { SessionState } from "./state.ts";
-import type { CommandAnalyzer, Config } from "./types.ts";
+import type { AnalysisTask, ClassificationResult, CommandAnalyzer, Config } from "./types.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
 import { createWidgetController } from "./widget.ts";
 
@@ -13,12 +13,6 @@ export interface PermissionRuntime {
   readonly state: SessionState;
   dispose(): void;
 }
-
-/** Phase-two production fallback: no provider calls until the model adapters are implemented. */
-export const unavailableAnalyzer: CommandAnalyzer = async (_command, _signal, publish) => {
-  publish({ kind: "classification", value: { status: "unavailable" } });
-  publish({ kind: "explanation", value: { status: "unavailable" } });
-};
 
 function notify(ctx: ExtensionContext, message: string): void {
   try { ctx.ui.notify(`[bash-cmd-checker] ${message}`, "warning"); } catch {}
@@ -42,7 +36,7 @@ export function attachPermissions(
     return inert();
   }
   const widget = createWidgetController(ctx.ui);
-  const tasks = new Map<string, AbortController>();
+  const tasks = new Map<string, { controller: AbortController; verdict: Promise<AuthorizerVerdict> }>();
   let boundService: ReturnType<ServiceAccessor>;
   let unregister: (() => void) | undefined;
   let warnedRegistration = false;
@@ -63,30 +57,60 @@ export function attachPermissions(
     if (!state.active) return { kind: "defer" };
     const observation = extractCommandObservation(details);
     if (!observation) return { kind: "defer" };
+    const pending = tasks.get(observation.requestId);
+    if (pending) return pending.verdict;
     const existing = state.get(observation.requestId);
     if (existing) return existing.verdict;
     const record = state.observe(observation, config.classifier.model === null);
     if (!record) return { kind: "defer" };
     const controller = new AbortController();
-    tasks.set(observation.requestId, controller);
     const publish: Parameters<CommandAnalyzer>[2] = (update) => {
       if (controller.signal.aborted || !state.publish(record, update)) return;
       if (state.visible?.identity === record.identity) refresh();
     };
-    // Detached work is owned by this session, not by the human dialog's lifetime.
-    void Promise.resolve().then(() => {
-      if (!controller.signal.aborted) return analyzer(record.observation, controller.signal, publish);
-    }).catch(() => {
-      publish({ kind: "classification", value: { status: "failed" } });
+    let resolveVerdict!: (value: AuthorizerVerdict) => void;
+    const verdict = new Promise<AuthorizerVerdict>((resolve) => { resolveVerdict = resolve; });
+    let settled = false;
+    const finish = (classification: ClassificationResult): void => {
+      if (settled) return;
+      settled = true;
+      controller.signal.removeEventListener("abort", cancel);
+      if (controller.signal.aborted || !state.active) { resolveVerdict({ kind: "defer" }); return; }
+      publish({ kind: "classification", value: classification });
+      const result = state.get(observation.requestId)?.classification;
+      const decision: AuthorizerVerdict = config.autoBlockUnsafe && result?.status === "complete"
+        && result.risk === "unsafe"
+        ? { kind: "deny", reason: "Bash command blocked by the configured unsafe-risk policy." }
+        : { kind: "defer" };
+      if (state.settleVerdict(record, decision) && decision.kind === "deny") {
+        notify(ctx, "Blocked a bash command assessed as dangerous.");
+      }
+      resolveVerdict(decision);
+    };
+    const cancel = (): void => { finish({ status: "unavailable" }); };
+    controller.signal.addEventListener("abort", cancel, { once: true });
+    const entry = { controller, verdict };
+    // Reserve the request before starting adapters, including any synchronous/reentrant work.
+    tasks.set(observation.requestId, entry);
+    let task: AnalysisTask;
+    try {
+      task = analyzer(record.observation, controller.signal, publish);
+    } catch {
       publish({ kind: "explanation", value: { status: "unavailable" } });
-    }).finally(() => {
-      // An adapter that completes without a result must not leave a permanent placeholder.
-      publish({ kind: "classification", value: { status: "unavailable" } });
-      publish({ kind: "explanation", value: { status: "unavailable" } });
-      if (tasks.get(observation.requestId) === controller) tasks.delete(observation.requestId);
+      finish({ status: "failed" });
+      tasks.delete(observation.requestId);
+      return verdict;
+    }
+    void task.classification.then(finish, () => { finish({ status: "failed" }); });
+    const done = task.done.then(
+      () => { publish({ kind: "explanation", value: { status: "unavailable" } }); },
+      () => { publish({ kind: "explanation", value: { status: "unavailable" } }); },
+    );
+    // Only cleanup joins both tasks; authorization waits exclusively for the classification verdict.
+    void Promise.all([verdict, done]).then(() => {
+      if (tasks.get(observation.requestId) === entry) tasks.delete(observation.requestId);
     });
-    // Classification arbitration and auto-deny are deliberately deferred to phase three.
-    return record.verdict;
+    return verdict;
   };
 
   const releaseAuthorizer = (): void => {
@@ -119,7 +143,7 @@ export function attachPermissions(
     for (const unsubscribe of subscriptions) { try { unsubscribe(); } catch {} }
     subscriptions.length = 0;
     releaseAuthorizer();
-    for (const controller of tasks.values()) controller.abort();
+    for (const { controller } of tasks.values()) controller.abort();
     tasks.clear();
     try { widget.hide(); } catch {}
   };

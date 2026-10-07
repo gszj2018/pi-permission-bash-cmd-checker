@@ -4,6 +4,7 @@ import type {
 } from "@gotgenes/pi-permission-system";
 import { styleText, stripTerminalSequences, type Component, type TextStyle, type TUI } from "@earendil-works/pi-tui";
 import type { ServiceAccessor } from "../../extension/permissions.ts";
+import type { AnalysisUpdate, CommandAnalyzer, CommandObservation } from "../../extension/types.ts";
 
 export function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -11,6 +12,26 @@ export function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+export type MockBackgroundWork = (
+  command: CommandObservation, signal: AbortSignal, publish: (update: AnalysisUpdate) => void,
+) => Promise<void>;
+
+/** Event/lifecycle tests can keep explanation work pending while classification is unavailable. */
+export function mockBackgroundAnalyzer(work: MockBackgroundWork): CommandAnalyzer {
+  return (command, signal, publish) => ({
+    classification: Promise.resolve({ status: "unavailable" }),
+    done: Promise.resolve().then(() => {
+      if (!signal.aborted) return work(command, signal, publish);
+    }).catch(() => {
+      if (!signal.aborted) publish({ kind: "explanation", value: { status: "unavailable" } });
+    }),
+  });
+}
+
+export const unavailableAnalyzer = mockBackgroundAnalyzer(async (_command, _signal, publish) => {
+  publish({ kind: "explanation", value: { status: "unavailable" } });
+});
 
 /** Drain the deterministic promise chain used by the mock adapters; never sleep or start a timer. */
 export async function flushPromises(): Promise<void> {
@@ -99,7 +120,7 @@ export function createContext(sessionId = "session-1", mode: ExtensionContext["m
     hasUI: mode === "tui" || mode === "rpc",
     sessionManager: { getSessionId: () => sessionId },
     ui: ui.ui,
-    get modelRegistry(): never { throw new Error("Phase two must not access real model APIs."); },
+    get modelRegistry(): never { throw new Error("This mock context must not access real model APIs."); },
   } as unknown as ExtensionContext;
   return { ctx, ui };
 }

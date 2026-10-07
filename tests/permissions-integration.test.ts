@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_CONFIG } from "../extension/config.ts";
 import { initializeTui, registerLifecycle, type TuiDependencies } from "../extension/lifecycle.ts";
-import { attachPermissions, unavailableAnalyzer } from "../extension/permissions.ts";
-import type { AnalysisUpdate, CommandAnalyzer } from "../extension/types.ts";
+import { attachPermissions } from "../extension/permissions.ts";
+import type { AnalysisUpdate, ClassificationResult, CommandAnalyzer } from "../extension/types.ts";
 import { WIDGET_KEY } from "../extension/widget.ts";
-import { MockPi, MockService, commandDetails, createContext, deferred, flushPromises, promptEvent } from "./helpers/mocks.ts";
+import {
+  MockPi, MockService, commandDetails, createContext, deferred, flushPromises,
+  mockBackgroundAnalyzer, promptEvent, unavailableAnalyzer,
+} from "./helpers/mocks.ts";
 
 function setup(analyzer: CommandAnalyzer) {
   const pi = new MockPi();
@@ -20,14 +23,17 @@ function decision(requestId: string, result: "allow" | "deny" = "allow") {
   return { requestId, result, resolution: result === "allow" ? "user_approved" : "user_denied" };
 }
 
-test("authorizer defers without waiting for background work and only ui_prompt mounts the full command", async (t) => {
+test("authorizer waits only for classification and only ui_prompt mounts the full command", async (t) => {
   const pending = deferred<void>();
   let publish!: (update: AnalysisUpdate) => void;
   let signal!: AbortSignal;
   let starts = 0;
-  const app = setup(async (_command, captured, update) => {
+  const app = setup((_command, captured, update) => {
     starts++; publish = update; signal = captured;
-    return pending.promise;
+    return { classification: Promise.resolve<ClassificationResult>({
+      status: "complete", risk: "safe-ro", confidence: 0.9,
+      probabilities: { "safe-ro": 0.9, "safe-rw": 0.05, unsafe: 0.05 },
+    }), done: pending.promise };
   });
   t.after(app.runtime.dispose);
   const details = commandDetails();
@@ -40,16 +46,11 @@ test("authorizer defers without waiting for background work and only ui_prompt m
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   assert.ok(app.ui.text(WIDGET_KEY).includes(details.payload.evidence[0]!.text));
   assert.ok(app.ui.text(WIDGET_KEY).includes("Analyzing command…"));
-  assert.ok(app.ui.text(WIDGET_KEY).includes("Assessing command risk…"));
-  assert.equal(app.ui.text(WIDGET_KEY).includes("Likely Safe"), false);
+  assert.ok(app.ui.text(WIDGET_KEY).includes("✅  Likely Safe (RO)"));
   app.pi.events.emit("permissions:decision", decision(details.requestId));
   assert.equal(signal.aborted, false);
   assert.ok(app.ui.text(WIDGET_KEY).includes("Completed: allow"));
   publish({ kind: "explanation", value: { status: "complete", text: "Prints two values without writing files." } });
-  publish({ kind: "classification", value: {
-    status: "complete", risk: "safe-ro", confidence: 0.9,
-    probabilities: { "safe-ro": 0.9, "safe-rw": 0.05, unsafe: 0.05 },
-  } });
   pending.resolve();
   await flushPromises();
   assert.ok(app.ui.text(WIDGET_KEY).includes("Prints two values"));
@@ -59,11 +60,11 @@ test("authorizer defers without waiting for background work and only ui_prompt m
 
 test("old request completion cannot overwrite a newer prompt, and unsupported prompts hide stale advice", async (t) => {
   const jobs = new Map<string, { publish: (update: AnalysisUpdate) => void; done: ReturnType<typeof deferred<void>> }>();
-  const app = setup(async (command, _signal, publish) => {
+  const app = setup(mockBackgroundAnalyzer(async (command, _signal, publish) => {
     const done = deferred<void>();
     jobs.set(command.requestId, { publish, done });
     return done.promise;
-  });
+  }));
   t.after(app.runtime.dispose);
   const first = commandDetails("first");
   const second = commandDetails("second", "printf 'second complete command'");
@@ -169,9 +170,9 @@ test("shutdown aborts in-flight work, clears the cache and suppresses late updat
   const pending = deferred<void>();
   let publish!: (update: AnalysisUpdate) => void;
   let signal!: AbortSignal;
-  const app = setup(async (_command, captured, update) => {
+  const app = setup(mockBackgroundAnalyzer(async (_command, captured, update) => {
     publish = update; signal = captured; return pending.promise;
-  });
+  }));
   const details = commandDetails();
   await app.service.run(details);
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
@@ -192,18 +193,33 @@ test("shutdown aborts in-flight work, clears the cache and suppresses late updat
 });
 
 test("background errors and missing adapters fall back without blocking authorization or leaking errors", async (t) => {
-  const app = setup(async () => { throw new Error("SENSITIVE_PROVIDER_ERROR"); });
+  const app = setup(mockBackgroundAnalyzer(async () => { throw new Error("SENSITIVE_PROVIDER_ERROR"); }));
   t.after(app.runtime.dispose);
   const details = commandDetails();
   assert.deepEqual(await app.service.run(details), { kind: "defer" });
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   await flushPromises();
-  assert.ok(app.ui.text(WIDGET_KEY).includes("Risk assessment failed."));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Risk assessment unavailable."));
   assert.ok(app.ui.text(WIDGET_KEY).includes("Command explanation unavailable."));
   assert.equal(app.ui.text(WIDGET_KEY).includes("SENSITIVE_PROVIDER_ERROR"), false);
 });
 
-test("explicitly disabled classification remains yellow while phase-two analysis always defers", async () => {
+test("a synchronous analyzer failure settles once, defers and exposes no raw details", async (t) => {
+  let calls = 0;
+  const app = setup(() => { calls++; throw new Error("SENSITIVE_ANALYZER_ERROR"); });
+  t.after(app.runtime.dispose);
+  const details = commandDetails();
+  assert.deepEqual(await app.service.run(details), { kind: "defer" });
+  assert.deepEqual(await app.service.run(details), { kind: "defer" });
+  assert.equal(calls, 1);
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Risk assessment failed."));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Command explanation unavailable."));
+  assert.equal(app.ui.text(WIDGET_KEY).includes("SENSITIVE_ANALYZER_ERROR"), false);
+  assert.equal(app.runtime.state.get(details.requestId)?.verdictSettled, true);
+});
+
+test("explicitly disabled classification remains yellow and defers even with auto-blocking enabled", async () => {
   const pi = new MockPi();
   const service = new MockService();
   const { ctx, ui } = createContext();
@@ -253,7 +269,7 @@ test("session end-to-end cleanup is driven by lifecycle shutdown, not agent_end 
   registerLifecycle(pi.api, (api, context, signal) => initializeTui(api, context, signal, {
     loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
     loadAccessor: async () => () => service.service,
-    analyzer: unavailableAnalyzer,
+    createAnalyzer: () => unavailableAnalyzer,
     attachPermissions,
   }));
   await pi.emitLifecycle("session_start", ctx);
@@ -276,12 +292,13 @@ test("TUI initialization and permission attachment remain inert in non-TUI modes
     const dependencies: TuiDependencies = {
       loadConfig: async () => { throw new Error("Must not read config."); },
       loadAccessor: async () => { throw new Error("Must not import the permission package."); },
-      analyzer: async () => { throw new Error("Must not analyze in a non-TUI session."); },
+      createAnalyzer: () => { throw new Error("Must not create an analyzer in a non-TUI session."); },
       attachPermissions: () => { throw new Error("Must not attach in a non-TUI session."); },
     };
     await initializeTui(pi.api, ctx, new AbortController().signal, dependencies);
     const runtime = attachPermissions(
-      pi.api, ctx, DEFAULT_CONFIG, () => { throw new Error("Must not bind."); }, dependencies.analyzer,
+      pi.api, ctx, DEFAULT_CONFIG, () => { throw new Error("Must not bind."); },
+      () => { throw new Error("Must not analyze in a non-TUI session."); },
     );
     assert.equal(runtime.state.active, false, mode);
     assert.equal(pi.events.size, 0, mode);
@@ -298,10 +315,10 @@ test("TUI initialization uses the explicitly supplied analysis dependency", asyn
   const dispose = await initializeTui(pi.api, ctx, new AbortController().signal, {
     loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
     loadAccessor: async () => () => service.service,
-    analyzer: async (_command, _signal, publish) => {
+    createAnalyzer: () => mockBackgroundAnalyzer(async (_command, _signal, publish) => {
       calls++;
       publish({ kind: "explanation", value: { status: "complete", text: "Injected explanation" } });
-    },
+    }),
     attachPermissions,
   });
   const details = commandDetails();
@@ -321,7 +338,7 @@ test("invalid config and missing dependency each produce only a fixed startup wa
       loadConfig: async () => failure === "config"
         ? { status: "invalid", issues: ["SENSITIVE_CONFIG_ERROR"] } : { status: "loaded", config: DEFAULT_CONFIG },
       loadAccessor: async () => { throw new Error("SENSITIVE_IMPORT_ERROR"); },
-      analyzer: unavailableAnalyzer,
+      createAnalyzer: () => { throw new Error("Must not create an analyzer after initialization failure."); },
       attachPermissions: () => { throw new Error("Must not attach after initialization failure."); },
     });
     assert.equal(ui.notifications.length, 1);
@@ -345,7 +362,7 @@ test("shutdown across initialization awaits never binds a stale session or calls
         if (boundary === "accessor") await pending.promise;
         return () => { throw new Error("Must not bind after shutdown."); };
       },
-      analyzer: unavailableAnalyzer,
+      createAnalyzer: () => { throw new Error("Must not create an analyzer after shutdown."); },
       attachPermissions: () => { throw new Error("Must not attach after shutdown."); },
     });
     await flushPromises();
