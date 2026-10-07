@@ -1,0 +1,41 @@
+{
+  "name": "pi-permission-bash-cmd-checker",
+  "version": "0.1.0",
+  "description": "Pi TUI extension for bash command explanations and optional classifier-based risk assessment",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension"
+  ],
+  "license": "MIT",
+  "author": "gszj2018",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "extension",
+    "schemas",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": ["./extension/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*",
+    "@gotgenes/pi-permission-system": ">=39.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
