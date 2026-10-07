@@ -89,7 +89,7 @@ export class CommandWidget implements Component {
     }
     const record = this.record;
     const palette = PALETTES[theme.appearance];
-    const lines: string[] = [];
+    const lines: string[] = ["─".repeat(width)];
     const add = (text: string, color?: Color): void => {
       for (const line of wrapTerminalText(sanitizeTerminalText(text), width)) {
         lines.push(color ? theme.style(line, { fg: color }) : line);
@@ -102,11 +102,10 @@ export class CommandWidget implements Component {
     if (requester.forwarded) {
       add(`Requester: ${requester.agentName ?? "Subagent"} · Session: ${requester.sessionId ?? "unknown"}`);
     } else if (requester.agentName !== null) add(`Requester: ${requester.agentName}`);
-    const risk = riskDisplay(record.classification);
-    add(risk.text, palette[risk.color]);
     add("Command:");
     add(record.observation.fullCommand);
-    add("Explanation:");
+    const risk = riskDisplay(record.classification);
+    add(risk.text, palette[risk.color]);
     add(record.explanation.status === "complete" ? record.explanation.text
       : record.explanation.status === "pending" ? "Analyzing command…" : "Command explanation unavailable.");
     this.cache = { width, record, theme, lines };
