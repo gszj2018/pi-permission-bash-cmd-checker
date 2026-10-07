@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
 import { SessionState } from "../extension/state.ts";
-import type { ClassificationState, CommandRecord, RiskLevel } from "../extension/types.ts";
+import type { ClassificationState, CommandRecord, ExplanationState, RiskLevel } from "../extension/types.ts";
 import { CommandWidget, WIDGET_KEY, createWidgetController, sanitizeTerminalText, wrapTerminalText } from "../extension/widget.ts";
 import { commandDetails, createContext, mockTheme } from "./helpers/mocks.ts";
 
@@ -36,6 +36,33 @@ test("risk labels use exactly two spaces and concrete semantic colors", () => {
   }
 });
 
+test("explanation colors depend only on classification, including wrapped text and placeholders", () => {
+  const lightColors: Record<RiskLevel, string> = {
+    "safe-ro": "0;125;50", "safe-rw": "0;85;205", unsafe: "190;0;0", unknown: "145;110;0",
+  };
+  const explanations: [ExplanationState, string][] = [
+    [{ status: "complete", text: "Deletes data and exposes secrets." }, "Deletes data and exposes secrets."],
+    [{ status: "complete", text: "Safely reads a file." }, "Safely reads a file."],
+    [{ status: "pending" }, "Analyzing command…"],
+    [{ status: "unavailable" }, "Command explanation unavailable."],
+  ];
+  for (const appearance of ["dark", "light"] as const) {
+    for (const [risk, , darkColor] of riskCases) {
+      const color = appearance === "dark" ? darkColor : lightColors[risk];
+      for (const [explanation, text] of explanations) {
+        const widget = new CommandWidget({ ...record(), classification: classified(risk), explanation },
+          () => mockTheme(appearance));
+        for (const width of [12, 200]) {
+          const expected = wrapTerminalText(text, width);
+          const lines = widget.render(width).slice(-expected.length);
+          assert.deepEqual(lines.map(stripTerminalSequences), expected);
+          for (const line of lines) assert.ok(line.includes(`\u001b[38;2;${color}m`));
+        }
+      }
+    }
+  }
+});
+
 test("all non-assessment notices are yellow, unadorned and distinct from unknown", () => {
   const cases = {
     pending: "Assessing command risk…",
@@ -46,12 +73,18 @@ test("all non-assessment notices are yellow, unadorned and distinct from unknown
   for (const appearance of ["dark", "light"] as const) {
     for (const [status, text] of Object.entries(cases)) {
       const classification = { status } as ClassificationState;
-      const widget = new CommandWidget({ ...record(), classification }, () => mockTheme(appearance));
+      const explanation = "Safely reads a file.";
+      const widget = new CommandWidget({
+        ...record(), classification, explanation: { status: "complete", text: explanation },
+      }, () => mockTheme(appearance));
       const lines = widget.render(200);
       const notice = lines.find((line) => stripTerminalSequences(line) === text);
       assert.ok(notice);
       const yellow = appearance === "dark" ? "255;215;0" : "145;110;0";
       assert.ok(notice.includes(`\u001b[38;2;${yellow}m`));
+      const explanationLine = lines.find((line) => stripTerminalSequences(line) === explanation);
+      assert.ok(explanationLine);
+      assert.ok(explanationLine.includes(`\u001b[38;2;${yellow}m`));
       assert.equal(/[✅ℹ⛔⚠]|Unknown/.test(stripTerminalSequences(notice)), false);
       assert.ok(lines.some((line) => line === "printf 'a' && printf 'b'"));
     }
@@ -70,7 +103,7 @@ test("pending risk shows progress without a risk badge while explanation and per
   assert.ok(text.includes("Completed: allow (user_approved)"));
   assert.ok(text.includes("Analyzing command…"));
   widget.setRecord({ ...record(), explanation: { status: "unavailable" } });
-  assert.ok(widget.render(200).includes("Command explanation unavailable."));
+  assert.ok(widget.render(200).map(stripTerminalSequences).includes("Command explanation unavailable."));
 });
 
 test("terminal controls and directional overrides become visible escapes, with only LF preserved", () => {

@@ -106,8 +106,9 @@ export class CommandWidget implements Component {
     add(record.observation.fullCommand);
     const risk = riskDisplay(record.classification);
     add(risk.text, palette[risk.color]);
-    add(record.explanation.status === "complete" ? record.explanation.text
-      : record.explanation.status === "pending" ? "Analyzing command…" : "Command explanation unavailable.");
+    const explanation = record.explanation.status === "complete" ? record.explanation.text
+      : record.explanation.status === "pending" ? "Analyzing command…" : "Command explanation unavailable.";
+    add(explanation, palette[risk.color]);
     this.cache = { width, record, theme, lines };
     return lines;
   }
