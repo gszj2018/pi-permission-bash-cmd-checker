@@ -83,6 +83,9 @@ export function attachPermissions(
         ? { kind: "deny", reason: "Bash command blocked by the configured unsafe-risk policy." }
         : { kind: "defer" };
       if (state.settleVerdict(record, decision) && decision.kind === "deny") {
+        // Automatic denial has no permission prompt, but still displays the cached analysis.
+        state.show(observation.requestId, false);
+        refresh();
         notify(ctx, "Blocked a bash command assessed as dangerous.");
       }
       resolveVerdict(decision);

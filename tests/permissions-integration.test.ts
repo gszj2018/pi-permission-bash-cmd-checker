@@ -23,7 +23,7 @@ function decision(requestId: string, result: "allow" | "deny" = "allow") {
   return { requestId, result, resolution: result === "allow" ? "user_approved" : "user_denied" };
 }
 
-test("authorizer waits only for classification and only ui_prompt mounts the full command", async (t) => {
+test("deferred requests wait only for classification and mount only after ui_prompt", async (t) => {
   const pending = deferred<void>();
   let publish!: (update: AnalysisUpdate) => void;
   let signal!: AbortSignal;

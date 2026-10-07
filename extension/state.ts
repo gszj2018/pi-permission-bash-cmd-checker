@@ -62,11 +62,12 @@ export class SessionState {
     return true;
   }
 
-  show(requestId: string): CommandRecord | undefined {
+  /** Make a record visible; only a real permission prompt marks it prompted. */
+  show(requestId: string, fromPrompt = true): CommandRecord | undefined {
     if (this.closed) return undefined;
     const record = this.records.get(requestId);
     this.visibleRequestId = record ? requestId : undefined;
-    if (!record) return undefined;
+    if (!record || !fromPrompt) return record;
     const prompted = Object.freeze({ ...record, prompted: true });
     this.records.set(requestId, prompted);
     return prompted;

@@ -31,6 +31,18 @@ test("state deduplicates only request IDs, retains all completed records and kee
   assert.equal(state.decide("request-1", { result: "deny", resolution: "user_denied" }), false);
 });
 
+test("automatic display does not invent a permission prompt or final permission outcome", () => {
+  const state = new SessionState();
+  const record = observe(state);
+  state.settleVerdict(record, { kind: "deny", reason: "Fixed policy reason." });
+  const shown = state.show("request-1", false);
+  assert.equal(shown?.prompted, false);
+  assert.equal(shown?.decision, undefined);
+  assert.equal(state.visible?.identity, record.identity);
+  assert.equal(state.show("request-1")?.prompted, true);
+  assert.equal(state.show("request-1", false)?.prompted, true);
+});
+
 test("final verdicts are immutable, settle once and cannot cross a session generation", () => {
   const state = new SessionState();
   const record = observe(state);
