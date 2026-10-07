@@ -24,10 +24,12 @@ const PALETTES = {
   dark: {
     green: rgbColor(100, 220, 140), blue: rgbColor(80, 160, 255),
     red: rgbColor(255, 100, 100), yellow: rgbColor(255, 215, 0),
+    commandBackground: rgbColor(35, 55, 80),
   },
   light: {
     green: rgbColor(0, 125, 50), blue: rgbColor(0, 85, 205),
     red: rgbColor(190, 0, 0), yellow: rgbColor(145, 110, 0),
+    commandBackground: rgbColor(220, 235, 255),
   },
 };
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -90,9 +92,9 @@ export class CommandWidget implements Component {
     const record = this.record;
     const palette = PALETTES[theme.appearance];
     const lines: string[] = ["─".repeat(width)];
-    const add = (text: string, color?: Color): void => {
+    const add = (text: string, color?: Color, background?: Color): void => {
       for (const line of wrapTerminalText(sanitizeTerminalText(text), width)) {
-        lines.push(color ? theme.style(line, { fg: color }) : line);
+        lines.push(color || background ? theme.style(line, { fg: color, bg: background }) : line);
       }
     };
     const status = record.decision ? `Completed: ${record.decision.result} (${record.decision.resolution})`
@@ -103,7 +105,7 @@ export class CommandWidget implements Component {
       add(`Requester: ${requester.agentName ?? "Subagent"} · Session: ${requester.sessionId ?? "unknown"}`);
     } else if (requester.agentName !== null) add(`Requester: ${requester.agentName}`);
     add("Command:");
-    add(record.observation.fullCommand);
+    add(record.observation.fullCommand, undefined, palette.commandBackground);
     const risk = riskDisplay(record.classification);
     add(risk.text, palette[risk.color]);
     const explanation = record.explanation.status === "complete" ? record.explanation.text

@@ -36,6 +36,39 @@ test("risk labels use exactly two spaces and concrete semantic colors", () => {
   }
 });
 
+test("commands have a theme-aware background independent of risk while the heading remains unstyled", () => {
+  for (const appearance of ["dark", "light"] as const) {
+    for (const [risk] of riskCases) {
+      const current = record();
+      const widget = new CommandWidget({ ...current, classification: classified(risk) }, () => mockTheme(appearance));
+      const lines = widget.render(200);
+      const heading = lines.find((line) => stripTerminalSequences(line) === "Command:");
+      assert.equal(heading, "Command:");
+      const command = lines.find((line) => stripTerminalSequences(line) === current.observation.fullCommand);
+      assert.ok(command);
+      const background = appearance === "dark" ? "35;55;80" : "220;235;255";
+      assert.ok(command.includes(`\u001b[48;2;${background}m`));
+      assert.equal(command.includes("\u001b[38;"), false);
+      assert.ok(command.endsWith("\u001b[49m"));
+    }
+  }
+});
+
+test("command backgrounds preserve complete sanitized text, spaces and graphemes across wrapping", () => {
+  const source = "  printf 'a  b' && printf '中😀e\u0301'\n\nprintf '\u001b[2J'  ";
+  const current = record(source);
+  for (const appearance of ["dark", "light"] as const) {
+    const widget = new CommandWidget(current, () => mockTheme(appearance));
+    const background = appearance === "dark" ? "35;55;80" : "220;235;255";
+    for (const width of [1, 7, 40]) {
+      const lines = widget.render(width).filter((line) => line.includes(`\u001b[48;2;${background}m`));
+      assert.deepEqual(lines.map(stripTerminalSequences), wrapTerminalText(sanitizeTerminalText(source), width));
+      for (const line of lines) assert.ok(line.endsWith("\u001b[49m"));
+    }
+  }
+  assert.equal(current.observation.fullCommand, source);
+});
+
 test("explanation colors depend only on classification, including wrapped text and placeholders", () => {
   const lightColors: Record<RiskLevel, string> = {
     "safe-ro": "0;125;50", "safe-rw": "0;85;205", unsafe: "190;0;0", unknown: "145;110;0",
@@ -86,7 +119,7 @@ test("all non-assessment notices are yellow, unadorned and distinct from unknown
       assert.ok(explanationLine);
       assert.ok(explanationLine.includes(`\u001b[38;2;${yellow}m`));
       assert.equal(/[✅ℹ⛔⚠]|Unknown/.test(stripTerminalSequences(notice)), false);
-      assert.ok(lines.some((line) => line === "printf 'a' && printf 'b'"));
+      assert.ok(lines.some((line) => stripTerminalSequences(line) === "printf 'a' && printf 'b'"));
     }
   }
 });
@@ -165,7 +198,9 @@ test("resize and theme invalidation recompute rendering without stale ANSI color
   widget.invalidate();
   const light = widget.render(200);
   assert.ok(light.some((line) => line.includes("\u001b[38;2;0;85;205m")));
+  assert.ok(light.some((line) => line.includes("\u001b[48;2;220;235;255m")));
   assert.equal(light.join("\n").includes("\u001b[38;2;80;160;255m"), false);
+  assert.equal(light.join("\n").includes("\u001b[48;2;35;55;80m"), false);
   assert.deepEqual(widget.render(0), []);
 });
 
