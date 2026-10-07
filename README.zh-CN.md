@@ -16,12 +16,12 @@
 
 使用分类模型评估命令风险，默认使用 `typesafe/jev-latest`：
 
-| 结果 | 显示 | 含义 |
-|------|------|------|
-| `safe-ro` | ✅  Likely Safe (RO) | 大概率安全的只读操作。 |
-| `safe-rw` | ℹ  Likely Safe (RW) | 会修改数据、但大概率安全的操作。 |
-| `unsafe` | ⛔  Dangerous | 可能危险的操作。 |
-| `unknown` | ⚠  Unknown | 无法有把握地判定风险。 |
+| 结果      | 显示                 | 含义                             |
+|-----------|----------------------|----------------------------------|
+| `safe-ro` | ✅  Likely Safe (RO) | 大概率安全的只读操作。           |
+| `safe-rw` | ℹ  Likely Safe (RW)  | 会修改数据、但大概率安全的操作。 |
+| `unsafe`  | ⛔  Dangerous        | 可能危险的操作。                 |
+| `unknown` | ⚠  Unknown          | 无法有把握地判定风险。           |
 
 启用 `autoBlockUnsafe` 后，可自动拦截被判定为危险的命令；该选项默认关闭。
 
@@ -68,13 +68,13 @@ pi install git:github.com/gszj2018/pi-permission-bash-cmd-checker
 
 ### 浮窗操作
 
-| 按键 | 操作 |
-|------|------|
+| 按键                      | 操作                     |
+|---------------------------|--------------------------|
 | **Alt+C**，或自定义快捷键 | 打开或关闭命令全文浮窗。 |
-| **↑ / ↓** | 逐行滚动。 |
-| **PgUp / PgDn** | 翻页。 |
-| **Home / End** | 跳到开头或结尾。 |
-| **Esc / q / Enter** | 关闭浮窗。 |
+| **↑ / ↓**                 | 逐行滚动。               |
+| **PgUp / PgDn**           | 翻页。                   |
+| **Home / End**            | 跳到开头或结尾。         |
+| **Esc / q / Enter**       | 关闭浮窗。               |
 
 fullscreen 模式支持滚轮滚动，regular 模式请使用键盘滚动。
 
@@ -107,18 +107,18 @@ fullscreen 模式支持滚轮滚动，regular 模式请使用键盘滚动。
 
 ### 配置字段
 
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `llm.model` | `null` | 用于生成解释的模型，格式为 `{ "provider": "…", "id": "…" }`。<br>为 null 时使用当前会话默认模型。 |
-| `llm.language` | `"en"` | 解释所用语言：`en` 为英文，`zh` 为简体中文。 |
-| `llm.timeoutMs` | `30000` | 解释超时时间，单位为毫秒。 |
-| `classifier.model` | `typesafe/jev-latest` | 用于风险分类的模型，格式为 `{ "provider": "…", "id": "…" }`。<br>为 null 时仅关闭风险评估。 |
-| `classifier.timeoutMs` | `10000` | 风险评估超时时间，单位为毫秒。 |
-| `classifier.thresholds.safe` | `0.5` | 安全类别所需的最低概率。 |
-| `classifier.thresholds.unsafe` | `0.3` | 危险类别所需的最低概率。 |
-| `classifier.thresholds.confidence` | `0.8` | 接受评估结论所需的最低置信度。 |
-| `widget.commandViewerShortcut` | `"alt+c"` | 打开命令全文浮窗的快捷键。 |
-| `autoBlockUnsafe` | `false` | 自动拦截被判定为危险的命令。 |
+| 字段                               | 默认值                | 说明                                                                                              |
+|------------------------------------|-----------------------|---------------------------------------------------------------------------------------------------|
+| `llm.model`                        | `null`                | 用于生成解释的模型，格式为 `{ "provider": "…", "id": "…" }`。<br>为 null 时使用当前会话默认模型。 |
+| `llm.language`                     | `"en"`                | 解释所用语言：`en` 为英文，`zh` 为简体中文。                                                      |
+| `llm.timeoutMs`                    | `30000`               | 解释超时时间，单位为毫秒。                                                                        |
+| `classifier.model`                 | `typesafe/jev-latest` | 用于风险分类的模型，格式为 `{ "provider": "…", "id": "…" }`。<br>为 null 时仅关闭风险评估。       |
+| `classifier.timeoutMs`             | `10000`               | 风险评估超时时间，单位为毫秒。                                                                    |
+| `classifier.thresholds.safe`       | `0.5`                 | 安全类别所需的最低概率。                                                                          |
+| `classifier.thresholds.unsafe`     | `0.3`                 | 危险类别所需的最低概率。                                                                          |
+| `classifier.thresholds.confidence` | `0.8`                 | 接受评估结论所需的最低置信度。                                                                    |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | 打开命令全文浮窗的快捷键。                                                                        |
+| `autoBlockUnsafe`                  | `false`               | 自动拦截被判定为危险的命令。                                                                      |
 
 ## 注意事项与限制
 

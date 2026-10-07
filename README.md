@@ -16,12 +16,12 @@ See a short explanation of what a bash command does, in English or Simplified Ch
 
 A classifier (default: `typesafe/jev-latest`) assesses command risk:
 
-| Result | Display | Meaning |
-|--------|---------|---------|
-| `safe-ro` | ✅  Likely Safe (RO) | Read-only operations that are likely safe. |
-| `safe-rw` | ℹ  Likely Safe (RW) | Operations that modify data but are likely safe. |
-| `unsafe` | ⛔  Dangerous | Operations that may be dangerous. |
-| `unknown` | ⚠  Unknown | The risk could not be determined with confidence. |
+| Result    | Display              | Meaning                                           |
+|-----------|----------------------|---------------------------------------------------|
+| `safe-ro` | ✅  Likely Safe (RO) | Read-only operations that are likely safe.        |
+| `safe-rw` | ℹ  Likely Safe (RW)  | Operations that modify data but are likely safe.  |
+| `unsafe`  | ⛔  Dangerous        | Operations that may be dangerous.                 |
+| `unknown` | ⚠  Unknown          | The risk could not be determined with confidence. |
 
 Set `autoBlockUnsafe` to `true` to block commands assessed as dangerous automatically.
 This option is disabled by default.
@@ -71,13 +71,13 @@ If you use project-level permission settings, make sure the chain in effect also
 
 ### Viewer Controls
 
-| Key | Action |
-|-----|--------|
+| Key                                    | Action                                 |
+|----------------------------------------|----------------------------------------|
 | **Alt+C**, or your configured shortcut | Open or close the full-command viewer. |
-| **↑ / ↓** | Scroll one line. |
-| **PgUp / PgDn** | Scroll one page. |
-| **Home / End** | Jump to the start or the end. |
-| **Esc / q / Enter** | Close the viewer. |
+| **↑ / ↓**                              | Scroll one line.                       |
+| **PgUp / PgDn**                        | Scroll one page.                       |
+| **Home / End**                         | Jump to the start or the end.          |
+| **Esc / q / Enter**                    | Close the viewer.                      |
 
 Mouse-wheel scrolling is available in fullscreen mode; use keyboard scrolling in regular mode.
 
@@ -110,18 +110,18 @@ JSON Schema. An optional `$schema` field enables schema validation in your edito
 
 ### Configuration Fields
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `llm.model` | `null` | Model used for explanations, in `{ "provider": "…", "id": "…" }` form.<br>`null` uses the current session's default model. |
-| `llm.language` | `"en"` | Language for explanations: `en` for English, `zh` for Simplified Chinese. |
-| `llm.timeoutMs` | `30000` | Timeout for explanations, in milliseconds. |
-| `classifier.model` | `typesafe/jev-latest` | Model used for risk classification, in `{ "provider": "…", "id": "…" }` form.<br>`null` disables risk assessment only. |
-| `classifier.timeoutMs` | `10000` | Timeout for risk assessment, in milliseconds. |
-| `classifier.thresholds.safe` | `0.5` | Minimum probability required for a safe category. |
-| `classifier.thresholds.unsafe` | `0.3` | Minimum probability required for the unsafe category. |
-| `classifier.thresholds.confidence` | `0.8` | Minimum confidence required to accept an assessment. |
-| `widget.commandViewerShortcut` | `"alt+c"` | Shortcut for opening the full-command viewer. |
-| `autoBlockUnsafe` | `false` | Automatically block commands assessed as dangerous. |
+| Field                              | Default               | Description                                                                                                                |
+|------------------------------------|-----------------------|----------------------------------------------------------------------------------------------------------------------------|
+| `llm.model`                        | `null`                | Model used for explanations, in `{ "provider": "…", "id": "…" }` form.<br>`null` uses the current session's default model. |
+| `llm.language`                     | `"en"`                | Language for explanations: `en` for English, `zh` for Simplified Chinese.                                                  |
+| `llm.timeoutMs`                    | `30000`               | Timeout for explanations, in milliseconds.                                                                                 |
+| `classifier.model`                 | `typesafe/jev-latest` | Model used for risk classification, in `{ "provider": "…", "id": "…" }` form.<br>`null` disables risk assessment only.     |
+| `classifier.timeoutMs`             | `10000`               | Timeout for risk assessment, in milliseconds.                                                                              |
+| `classifier.thresholds.safe`       | `0.5`                 | Minimum probability required for a safe category.                                                                          |
+| `classifier.thresholds.unsafe`     | `0.3`                 | Minimum probability required for the unsafe category.                                                                      |
+| `classifier.thresholds.confidence` | `0.8`                 | Minimum confidence required to accept an assessment.                                                                       |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | Shortcut for opening the full-command viewer.                                                                              |
+| `autoBlockUnsafe`                  | `false`               | Automatically block commands assessed as dangerous.                                                                        |
 
 ## Notes and Limitations
 
