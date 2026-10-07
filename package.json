@@ -8,6 +8,10 @@
     "pi-coding-agent",
     "extension"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gszj2018/pi-permission-bash-cmd-checker.git"
+  },
   "license": "MIT",
   "author": "gszj2018",
   "type": "module",
