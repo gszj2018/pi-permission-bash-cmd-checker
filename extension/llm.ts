@@ -22,7 +22,7 @@ const SYSTEM_PROMPTS: Readonly<Record<ExplanationLanguage, string>> = {
 
 /** Registry streaming resolves host authentication and preserves direct virtual-model routing. */
 export async function explainCommand(
-  ctx: Pick<ExtensionContext, "model" | "modelRegistry">,
+  ctx: Pick<ExtensionContext, "model" | "modelRegistry" | "sessionManager">,
   config: Config["llm"],
   command: CommandObservation,
   signal: AbortSignal,
@@ -33,10 +33,12 @@ export async function explainCommand(
     const reference = config.model;
     const model = reference ? ctx.modelRegistry.find(reference.provider, reference.id) : ctx.model;
     if (!model) return { status: "unavailable" };
+    // Keep background explanations on a separate provider conversation from the main agent.
+    const sessionId = `bash-cmd-checker:${ctx.sessionManager.getSessionId()}`;
     const result = await ctx.modelRegistry.streamSimple(model, {
       systemPrompt: SYSTEM_PROMPTS[config.language],
       messages: [{ role: "user", content: JSON.stringify({ command: command.fullCommand }), timestamp: Date.now() }],
-    }, { signal, maxTokens: 512 }).result();
+    }, { signal, maxTokens: 512, sessionId }).result();
     if (signal.aborted || (result.stopReason !== "stop" && result.stopReason !== "length")
       || result.content.some((block) => block.type === "toolCall")) return { status: "unavailable" };
     const text = result.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n").trim();

@@ -24,6 +24,10 @@ test("LLM captures the request-time selection and sends only the full command th
   const call = models.streams[0]!;
   assert.equal(call.options.signal, captured);
   assert.equal(call.options.maxTokens, 512);
+  const mainSessionId = ctx.sessionManager.getSessionId();
+  assert.equal(call.options.sessionId, `bash-cmd-checker:${mainSessionId}`);
+  assert.notEqual(call.options.sessionId, mainSessionId);
+  assert.equal(models.streams[1]?.options.sessionId, call.options.sessionId);
   assert.equal(call.context.tools, undefined);
   assert.equal(call.context.messages.length, 1);
   assert.equal(call.context.messages[0]?.role, "user");
@@ -31,6 +35,22 @@ test("LLM captures the request-time selection and sends only the full command th
   assert.match(call.context.systemPrompt!, /untrusted data/);
   assert.match(call.context.systemPrompt!, /English as plain text/);
   assert.equal(models.finds.length, 0);
+});
+
+test("LLM routing IDs track the serving session, not forwarded requester IDs", async () => {
+  const { ctx, models } = createModelContext();
+  let servingSessionId = "parent-1";
+  Object.defineProperty(ctx.sessionManager, "getSessionId", { value: () => servingSessionId });
+  const command = {
+    ...observedCommand(), requester: { forwarded: true, agentName: "Worker", sessionId: "child-session" },
+  };
+  await explainCommand(ctx, DEFAULT_CONFIG.llm, command, signal());
+  servingSessionId = "parent-2";
+  await explainCommand(ctx, DEFAULT_CONFIG.llm, command, signal());
+  assert.deepEqual(models.streams.map((call) => call.options.sessionId), [
+    "bash-cmd-checker:parent-1", "bash-cmd-checker:parent-2",
+  ]);
+  assert.equal(models.streams.some((call) => call.options.sessionId?.includes("child-session")), false);
 });
 
 test("LLM language selects an English or Simplified Chinese system prompt while preserving command data", async () => {
