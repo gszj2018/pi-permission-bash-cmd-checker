@@ -4,7 +4,7 @@ import type { Config, ConfigLoadResult, ModelReference } from "./types.ts";
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isCommandViewerShortcut } from "./shortcut.ts";
 import { isNonBlankString, isProbability, isRecord } from "./utils.ts";
 
-export const CONFIG_FILE_NAME = "permission-bash-cmd-checker.json";
+export const CONFIG_FILE_NAME = "bash-cmd-checker.json";
 /** Node timers cannot represent larger delays without overflowing. */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 

@@ -37,7 +37,7 @@ test("empty config uses the approved defaults and immutable nested values", () =
 
 test("partial sections default each omitted field without mutating the input", () => {
   const input = Object.freeze({
-    $schema: "./permission-bash-cmd-checker.schema.json",
+    $schema: "./bash-cmd-checker.schema.json",
     llm: Object.freeze({ timeoutMs: 1234 }),
     classifier: Object.freeze({ thresholds: Object.freeze({ unsafe: 0.2 }) }),
   });
@@ -170,7 +170,7 @@ test("config diagnostics contain neither supplied values nor unknown field names
 test("schema defaults, accepted fields and numeric constraints match the runtime contract", async () => {
   // Read a project artifact only; no user configuration, environment changes or schema network requests.
   const schema = JSON.parse(await readFile(
-    new URL("../schemas/permission-bash-cmd-checker.schema.json", import.meta.url), "utf8",
+    new URL("../schemas/bash-cmd-checker.schema.json", import.meta.url), "utf8",
   ));
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(Object.keys(schema.properties).sort(), ["$schema", "autoBlockUnsafe", "classifier", "llm", "widget"]);
@@ -234,6 +234,7 @@ test("config file loading is read-only and failures never return raw contents", 
   // All writes and deletion are confined to this test's unique temporary directory.
   const agentDir = await mkdtemp(join(tmpdir(), "bash-cmd-checker-config-"));
   t.after(async () => { await rm(agentDir, { recursive: true, force: true }); });
+  assert.equal(CONFIG_FILE_NAME, "bash-cmd-checker.json");
   const path = join(agentDir, CONFIG_FILE_NAME);
   assert.deepEqual(await loadConfigFrom(agentDir), { status: "missing", config: DEFAULT_CONFIG });
   assert.deepEqual(await readdir(agentDir), []);
