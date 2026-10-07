@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   CONFIG_FILE_NAME, DEFAULT_CONFIG, MAX_TIMEOUT_MS, loadConfigFrom, validateConfig,
 } from "../extension/config.ts";
+import { COMMAND_VIEWER_SHORTCUT_PATTERN } from "../extension/shortcut.ts";
 
 const expectedDefaults = {
   llm: { model: null, language: "en", timeoutMs: 30_000 },
@@ -15,6 +16,7 @@ const expectedDefaults = {
     thresholds: { safe: 0.5, unsafe: 0.3, confidence: 0.8 },
   },
   autoBlockUnsafe: false,
+  widget: { commandViewerShortcut: "alt+c" },
 };
 
 test("empty config uses the approved defaults and immutable nested values", () => {
@@ -29,6 +31,7 @@ test("empty config uses the approved defaults and immutable nested values", () =
     assert.ok(Object.isFrozen(config.classifier));
     assert.ok(Object.isFrozen(config.classifier.model));
     assert.ok(Object.isFrozen(config.classifier.thresholds));
+    assert.ok(Object.isFrozen(config.widget));
   }
 });
 
@@ -84,6 +87,30 @@ test("LLM explanation language accepts only English or Simplified Chinese withou
   }
 });
 
+test("command viewer shortcuts default per field and strictly validate without changing analysis", () => {
+  assert.deepEqual(validateConfig({ widget: {} }), validateConfig({}));
+  for (const commandViewerShortcut of ["alt+c", "ctrl+;", "alt+m", "ctrl+alt+v", "ctrl+shift+=", "f6", "super+k"]) {
+    const widget = Object.freeze({ commandViewerShortcut });
+    const input = Object.freeze({ widget });
+    const result = validateConfig(input);
+    assert.equal(result.status, "valid");
+    if (result.status !== "valid") continue;
+    assert.deepEqual(result.config, { ...expectedDefaults, widget: { commandViewerShortcut } });
+    assert.notEqual(result.config.widget, widget);
+    assert.ok(Object.isFrozen(result.config.widget));
+    assert.equal(input.widget.commandViewerShortcut, commandViewerShortcut);
+  }
+  for (const commandViewerShortcut of [
+    "", "Ctrl+;", "ctrl+; ", "ctrl+;\n", "control+x", "ctrl+ctrl+x", "ctrl+f13", "unknown", "ctrl+", "ctrl++", "+",
+    "esc", "escape", "q", "enter", "return", "up", "down", "pageUp", "pageDown", "home", "end",
+    null, undefined, 1, false, {}, [],
+  ]) {
+    assert.deepEqual(validateConfig({ widget: { commandViewerShortcut } }), {
+      status: "invalid", issues: ["widget.commandViewerShortcut: expected a valid non-reserved shortcut."],
+    });
+  }
+});
+
 test("threshold and timer boundaries are inclusive", () => {
   const result = validateConfig({
     llm: { timeoutMs: 1 },
@@ -96,6 +123,7 @@ const invalidConfigs: unknown[] = [
   null, undefined, [], "config", 123,
   { $schema: null },
   { llm: null }, { classifier: [] }, { classifier: { thresholds: null } },
+  { widget: null }, { widget: [] }, { widget: undefined }, { widget: "ctrl+;" }, { widget: { unexpected: true } },
   { llm: { model: "provider/id" } }, { llm: { model: {} } },
   { llm: { model: { provider: "typesafe" } } },
   { llm: { model: { provider: " ", id: "model" } } },
@@ -127,7 +155,9 @@ test("invalid values and unknown fields reject the entire config without coercio
 
 test("config diagnostics contain neither supplied values nor unknown field names", () => {
   const secret = "SENSITIVE_CONFIG_MARKER";
-  const result = validateConfig({ [secret]: secret, llm: { timeoutMs: secret, language: secret } });
+  const result = validateConfig({
+    [secret]: secret, llm: { timeoutMs: secret, language: secret }, widget: { [secret]: secret, commandViewerShortcut: secret },
+  });
   assert.equal(result.status, "invalid");
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
@@ -138,10 +168,18 @@ test("schema defaults, accepted fields and numeric constraints match the runtime
     new URL("../schemas/permission-bash-cmd-checker.schema.json", import.meta.url), "utf8",
   ));
   assert.equal(schema.additionalProperties, false);
-  assert.deepEqual(Object.keys(schema.properties).sort(), ["$schema", "autoBlockUnsafe", "classifier", "llm"]);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["$schema", "autoBlockUnsafe", "classifier", "llm", "widget"]);
   assert.deepEqual(schema.properties.llm.default, DEFAULT_CONFIG.llm);
   assert.deepEqual(schema.properties.classifier.default, DEFAULT_CONFIG.classifier);
   assert.equal(schema.properties.autoBlockUnsafe.default, DEFAULT_CONFIG.autoBlockUnsafe);
+  const widget = schema.properties.widget;
+  assert.equal(widget.additionalProperties, false);
+  assert.deepEqual(widget.default, DEFAULT_CONFIG.widget);
+  assert.deepEqual(Object.keys(widget.properties), ["commandViewerShortcut"]);
+  const shortcut = widget.properties.commandViewerShortcut;
+  assert.equal(shortcut.type, "string");
+  assert.equal(shortcut.default, DEFAULT_CONFIG.widget.commandViewerShortcut);
+  assert.equal(shortcut.pattern, COMMAND_VIEWER_SHORTCUT_PATTERN);
   for (const name of ["llm", "classifier"]) {
     const section = schema.properties[name];
     assert.equal(section.additionalProperties, false);

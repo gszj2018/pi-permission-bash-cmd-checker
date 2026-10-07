@@ -35,7 +35,7 @@ export function attachPermissions(
     notify(ctx, "Session identity unavailable; checker disabled.");
     return inert();
   }
-  const widget = createWidgetController(ctx.ui);
+  const widget = createWidgetController(ctx.ui, config.widget.commandViewerShortcut);
   const tasks = new Map<string, { controller: AbortController; verdict: Promise<AuthorizerVerdict> }>();
   let boundService: ReturnType<ServiceAccessor>;
   let unregister: (() => void) | undefined;
@@ -148,7 +148,7 @@ export function attachPermissions(
     releaseAuthorizer();
     for (const { controller } of tasks.values()) controller.abort();
     tasks.clear();
-    try { widget.hide(); } catch {}
+    try { widget.dispose(); } catch {}
   };
 
   try {

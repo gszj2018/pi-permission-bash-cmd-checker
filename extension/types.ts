@@ -1,4 +1,5 @@
 import type { AuthorizerVerdict } from "@gotgenes/pi-permission-system";
+import type { KeyId } from "@earendil-works/pi-tui";
 
 export interface ModelReference {
   readonly provider: string;
@@ -28,6 +29,9 @@ export interface Config {
     readonly thresholds: RiskThresholds;
   };
   readonly autoBlockUnsafe: boolean;
+  readonly widget: {
+    readonly commandViewerShortcut: KeyId;
+  };
 }
 
 /** Only these labels are sent to the classifier as criteria. */

@@ -234,6 +234,97 @@ test("explicitly disabled classification remains yellow and defers even with aut
   runtime.dispose();
 });
 
+test("permission events cannot change a viewer snapshot or close it when hiding the live widget", async (t) => {
+  const jobs = new Map<string, { publish: (update: AnalysisUpdate) => void; done: ReturnType<typeof deferred<void>> }>();
+  const app = setup(mockBackgroundAnalyzer(async (command, _signal, publish) => {
+    const done = deferred<void>();
+    jobs.set(command.requestId, { publish, done });
+    return done.promise;
+  }));
+  t.after(() => { app.runtime.dispose(); for (const job of jobs.values()) job.done.resolve(); });
+  const source = Array.from({ length: 40 }, (_, index) => `printf 'first-${index}'`).join("\n");
+  const first = commandDetails("locked-first", source);
+  assert.deepEqual(await app.service.run(first), { kind: "defer" });
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(first));
+  assert.equal(app.runtime.state.get(first.requestId)?.observation.fullCommand, source);
+  assert.equal(app.ui.text(WIDGET_KEY).includes("first-39"), false);
+  app.ui.input("\u001bc");
+  await flushPromises();
+  app.ui.input("\u001b[F");
+  const locked = app.ui.overlayText();
+  assert.ok(locked.includes("first-39"));
+  app.pi.events.emit("permissions:decision", decision(first.requestId));
+  jobs.get(first.requestId)!.publish({ kind: "explanation", value: { status: "complete", text: "Later explanation." } });
+  assert.equal(app.ui.overlayText(), locked);
+  const second = commandDetails("live-second", "printf 'second command'");
+  await app.service.run(second);
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("second command"));
+  assert.equal(app.ui.overlayText(), locked);
+  app.pi.events.emit("permissions:ui_prompt", { requestId: "unobserved" });
+  assert.equal(app.ui.components.size, 0);
+  assert.equal(app.ui.overlays.length, 1);
+  assert.equal(app.ui.overlayText(), locked);
+  app.ui.input("\r");
+  await flushPromises();
+  assert.equal(app.ui.overlays.length, 0);
+  assert.equal(app.ui.editorInputs.length, 0);
+  assert.equal(app.runtime.state.get(first.requestId)?.decision?.result, "allow");
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
+  app.ui.input("\u001bc");
+  await flushPromises();
+  assert.ok(app.ui.overlayText().includes("second command"));
+  app.lifetime.abort();
+  await flushPromises();
+  assert.equal(app.ui.overlays.length, 0);
+  assert.equal(app.ui.inputHandlers.size, 0);
+  assert.equal(app.runtime.state.active, false);
+});
+
+test("permission attachment injects the configured viewer shortcut and isolates UI failures", async (t) => {
+  const pi = new MockPi();
+  const service = new MockService();
+  const { ctx, ui } = createContext();
+  const config = { ...DEFAULT_CONFIG, widget: { commandViewerShortcut: "alt+m" as const } };
+  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, unavailableAnalyzer);
+  t.after(runtime.dispose);
+  const details = commandDetails();
+  assert.deepEqual(await service.run(details), { kind: "defer" });
+  pi.events.emit("permissions:ui_prompt", promptEvent(details));
+  ui.overlayError = new Error("SENSITIVE_VIEWER_ERROR");
+  ui.input("\u001bm");
+  await flushPromises();
+  assert.equal(ui.overlays.length, 0);
+  assert.deepEqual(await service.run(details), { kind: "defer" });
+  assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_VIEWER_ERROR"), false);
+  ui.overlayError = undefined;
+  ui.input("\u001bm");
+  await flushPromises();
+  assert.equal(ui.overlays.length, 1);
+  assert.ok(ui.overlayText().includes("Alt+m Close"));
+  runtime.dispose();
+  await flushPromises();
+  assert.equal(ui.inputHandlers.size, 0);
+  assert.equal(ui.overlays.length, 0);
+});
+
+test("an input listener failure cannot disable an unsafe authorization verdict or its widget", async (t) => {
+  const pi = new MockPi();
+  const service = new MockService();
+  const { ctx, ui } = createContext();
+  ui.ui.onTerminalInput = () => { throw new Error("SENSITIVE_INPUT_ERROR"); };
+  const runtime = attachPermissions(pi.api, ctx, { ...DEFAULT_CONFIG, autoBlockUnsafe: true }, () => service.service,
+    () => ({ classification: Promise.resolve<ClassificationResult>({
+      status: "complete", risk: "unsafe", confidence: 1, probabilities: { "safe-ro": 0, "safe-rw": 0, unsafe: 1 },
+    }), done: Promise.resolve() }));
+  t.after(runtime.dispose);
+  const result = await service.run(commandDetails());
+  assert.equal(result.kind, "deny");
+  assert.ok(ui.components.has(WIDGET_KEY));
+  assert.equal(ui.inputHandlers.size, 0);
+  assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_INPUT_ERROR"), false);
+});
+
 test("widget failures cannot block the gate or escape a background update", async () => {
   const pi = new MockPi();
   const service = new MockService();
@@ -279,8 +370,14 @@ test("session end-to-end cleanup is driven by lifecycle shutdown, not agent_end 
   await pi.emitLifecycle("agent_end", ctx);
   await pi.emitLifecycle("session_tree", ctx);
   assert.ok(ui.components.has(WIDGET_KEY));
+  ui.input("\u001bc");
+  await flushPromises();
+  assert.equal(ui.overlays.length, 1);
   await pi.emitLifecycle("session_shutdown", ctx, "new");
+  await flushPromises();
   assert.equal(ui.components.size, 0);
+  assert.equal(ui.overlays.length, 0);
+  assert.equal(ui.inputHandlers.size, 0);
   assert.equal(pi.events.size, 0);
   assert.equal(service.current, undefined);
 });
@@ -304,6 +401,8 @@ test("TUI initialization and permission attachment remain inert in non-TUI modes
     assert.equal(pi.events.size, 0, mode);
     assert.equal(ui.notifications.length, 0, mode);
     assert.equal(ui.mounts.length, 0, mode);
+    assert.equal(ui.inputHandlers.size, 0, mode);
+    assert.equal(ui.overlayHistory.length, 0, mode);
   }
 });
 

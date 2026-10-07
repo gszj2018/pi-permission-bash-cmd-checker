@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config, ModelReference } from "./types.ts";
+import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isCommandViewerShortcut } from "./shortcut.ts";
 import { isNonBlankString, isProbability, isRecord } from "./utils.ts";
 
 export const CONFIG_FILE_NAME = "permission-bash-cmd-checker.json";
@@ -15,6 +16,7 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
     thresholds: Object.freeze({ safe: 0.5, unsafe: 0.3, confidence: 0.8 }),
   }),
   autoBlockUnsafe: false,
+  widget: Object.freeze({ commandViewerShortcut: DEFAULT_COMMAND_VIEWER_SHORTCUT }),
 });
 
 export type ConfigValidationResult =
@@ -71,7 +73,7 @@ function probability(value: unknown, fallback: number, path: string, issues: str
 export function validateConfig(value: unknown): ConfigValidationResult {
   const issues: string[] = [];
   const root = section(value, "config", issues);
-  checkKeys(root, ["$schema", "llm", "classifier", "autoBlockUnsafe"], "config", issues);
+  checkKeys(root, ["$schema", "llm", "classifier", "autoBlockUnsafe", "widget"], "config", issues);
   if (Object.hasOwn(root, "$schema") && typeof root.$schema !== "string") {
     issues.push("$schema: expected a string.");
   }
@@ -80,6 +82,13 @@ export function validateConfig(value: unknown): ConfigValidationResult {
   const classifier = Object.hasOwn(root, "classifier") ? section(root.classifier, "classifier", issues) : {};
   checkKeys(llm, ["model", "language", "timeoutMs"], "llm", issues);
   checkKeys(classifier, ["model", "timeoutMs", "thresholds"], "classifier", issues);
+  const widget = Object.hasOwn(root, "widget") ? section(root.widget, "widget", issues) : {};
+  checkKeys(widget, ["commandViewerShortcut"], "widget", issues);
+  let commandViewerShortcut = DEFAULT_CONFIG.widget.commandViewerShortcut;
+  if (Object.hasOwn(widget, "commandViewerShortcut")) {
+    if (isCommandViewerShortcut(widget.commandViewerShortcut)) commandViewerShortcut = widget.commandViewerShortcut;
+    else issues.push("widget.commandViewerShortcut: expected a valid non-reserved shortcut.");
+  }
   const thresholds = Object.hasOwn(classifier, "thresholds")
     ? section(classifier.thresholds, "classifier.thresholds", issues)
     : {};
@@ -125,6 +134,7 @@ export function validateConfig(value: unknown): ConfigValidationResult {
         thresholds: Object.freeze(resolvedThresholds),
       }),
       autoBlockUnsafe,
+      widget: Object.freeze({ commandViewerShortcut }),
     }),
   };
 }

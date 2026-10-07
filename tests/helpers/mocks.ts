@@ -1,8 +1,13 @@
-import type { ExtensionAPI, ExtensionContext, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI, ExtensionContext, ExtensionUIContext, TerminalInputHandler, Theme,
+} from "@earendil-works/pi-coding-agent";
 import type {
   Authorizer, AuthorizerLog, PermissionQuery, PermissionUiPromptEvent, PromptPermissionDetails,
 } from "@gotgenes/pi-permission-system";
-import { styleText, stripTerminalSequences, type Component, type TextStyle, type TUI } from "@earendil-works/pi-tui";
+import {
+  isKeyRelease, styleText, stripTerminalSequences, type Component, type KeybindingsManager, type OverlayHandle,
+  type OverlayOptions, type TextStyle, type TUI,
+} from "@earendil-works/pi-tui";
 import type { ServiceAccessor } from "../../extension/permissions.ts";
 import type { AnalysisUpdate, CommandAnalyzer, CommandObservation } from "../../extension/types.ts";
 
@@ -83,29 +88,138 @@ export function mockTheme(appearance: "dark" | "light" = "dark"): Theme {
 }
 
 type WidgetFactory = (tui: TUI, theme: Theme) => Component;
+type DisposableComponent = Component & { dispose?(): void };
+type CustomOptions = NonNullable<Parameters<ExtensionUIContext["custom"]>[1]>;
+type CustomFactory<T> = (
+  tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: T) => void,
+) => DisposableComponent | Promise<DisposableComponent>;
+
+export interface MockOverlay {
+  readonly component: DisposableComponent;
+  readonly options: OverlayOptions | undefined;
+  readonly handle: OverlayHandle;
+  closed: boolean;
+  hidden: boolean;
+  focusOrder: number;
+}
 
 export class MockUi {
   currentTheme = mockTheme();
   readonly components = new Map<string, Component>();
   readonly notifications: { message: string; type?: string }[] = [];
   readonly mounts: { key: string; placement?: string; removed: boolean }[] = [];
+  readonly inputHandlers = new Set<TerminalInputHandler>();
+  readonly editorInputs: string[] = [];
+  readonly overlays: MockOverlay[] = [];
+  readonly overlayHistory: MockOverlay[] = [];
+  overlayError: unknown;
+  private focusedOverlay: MockOverlay | undefined;
+  private focusOrder = 0;
+  readonly tui: TUI;
+  columns = 100;
+  rows = 30;
   renders = 0;
+  closeCalls = 0;
   readonly ui: ExtensionUIContext;
 
   constructor() {
     const owner = this;
+    const tui = {
+      requestRender: () => { owner.renders++; },
+      showOverlay: (component: DisposableComponent, options?: OverlayOptions) => owner.mountOverlay(component, options),
+      terminal: {
+        get columns() { return owner.columns; },
+        get rows() { return owner.rows; },
+      },
+    } as unknown as TUI;
+    this.tui = tui;
     this.ui = {
       get theme(): Theme { return owner.currentTheme; },
       notify: (message: string, type?: string) => { owner.notifications.push({ message, type }); },
+      onTerminalInput: (handler: TerminalInputHandler) => {
+        owner.inputHandlers.add(handler);
+        return () => { owner.inputHandlers.delete(handler); };
+      },
       setWidget: (key: string, content: string[] | WidgetFactory | undefined, options?: { placement?: string }) => {
         owner.mounts.push({ key, placement: options?.placement, removed: content === undefined });
         if (content === undefined) owner.components.delete(key);
-        else if (typeof content === "function") {
-          const tui = { requestRender: () => { owner.renders++; } } as unknown as TUI;
-          owner.components.set(key, content(tui, owner.currentTheme));
-        } else throw new Error("Expected a non-interactive widget factory.");
+        else if (typeof content === "function") owner.components.set(key, content(tui, owner.currentTheme));
+        else throw new Error("Expected a non-interactive widget factory.");
+      },
+      custom: <T>(factory: CustomFactory<T>, options?: CustomOptions): Promise<T> => {
+        return new Promise<T>((resolve, reject) => {
+          let closed = false;
+          let component: DisposableComponent | undefined;
+          const done = (result: T): void => {
+            if (closed) return;
+            closed = true;
+            // Match ctx.ui.custom's last-created dismissal, not its visual focus order.
+            owner.overlays.at(-1)?.handle.hide();
+            component?.dispose?.();
+            resolve(result);
+          };
+          Promise.resolve(factory(tui, owner.currentTheme, {} as KeybindingsManager, done)).then((created) => {
+            if (closed) return;
+            component = created;
+            const overlayOptions = typeof options?.overlayOptions === "function"
+              ? options.overlayOptions() : options?.overlayOptions;
+            const handle = owner.mountOverlay(component, overlayOptions);
+            options?.onHandle?.(handle);
+          }).catch(reject);
+        });
       },
     } as unknown as ExtensionUIContext;
+  }
+
+  private mountOverlay(component: DisposableComponent, options?: OverlayOptions): OverlayHandle {
+    if (this.overlayError) throw this.overlayError;
+    const topVisible = (): MockOverlay | undefined => this.overlays.filter((item) => !item.hidden)
+      .sort((first, second) => second.focusOrder - first.focusOrder)[0];
+    const handle: OverlayHandle = {
+      hide: () => {
+        const index = this.overlays.indexOf(overlay);
+        if (index < 0) return;
+        this.overlays.splice(index, 1);
+        overlay.closed = true;
+        this.closeCalls++;
+        if (this.focusedOverlay === overlay) this.focusedOverlay = topVisible();
+      },
+      setHidden: (hidden) => {
+        overlay.hidden = hidden;
+        if (hidden && this.focusedOverlay === overlay) this.focusedOverlay = topVisible();
+      },
+      isHidden: () => overlay.hidden,
+      focus: () => {
+        if (overlay.closed || overlay.hidden) return;
+        overlay.focusOrder = ++this.focusOrder;
+        this.focusedOverlay = overlay;
+      },
+      unfocus: () => { if (this.focusedOverlay === overlay) this.focusedOverlay = undefined; },
+      isFocused: () => this.focusedOverlay === overlay,
+      getBounds: () => undefined,
+    };
+    const overlay: MockOverlay = { component, options, handle, closed: false, hidden: false, focusOrder: ++this.focusOrder };
+    this.overlays.push(overlay);
+    this.overlayHistory.push(overlay);
+    if (!options?.nonCapturing) this.focusedOverlay = overlay;
+    return handle;
+  }
+
+  input(data: string): boolean {
+    for (const handler of [...this.inputHandlers]) {
+      const result = handler(data);
+      if (result?.consume) return true;
+      if (result?.data !== undefined) data = result.data;
+    }
+    if (isKeyRelease(data)) return true;
+    const focused = this.focusedOverlay?.component;
+    if (focused) { focused.handleInput?.(data); return true; }
+    this.editorInputs.push(data);
+    return false;
+  }
+
+  overlayText(width = Math.max(1, Math.floor(this.columns * 0.9))): string {
+    return (this.focusedOverlay?.component.render(width) ?? []).map(stripTerminalSequences).join("\n");
   }
 
   text(key: string, width = 200): string {

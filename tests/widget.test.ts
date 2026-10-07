@@ -4,7 +4,9 @@ import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
 import { SessionState } from "../extension/state.ts";
 import type { ClassificationState, CommandRecord, ExplanationState, RiskLevel } from "../extension/types.ts";
-import { CommandWidget, WIDGET_KEY, createWidgetController, sanitizeTerminalText, wrapTerminalText } from "../extension/widget.ts";
+import {
+  CommandWidget, MAX_COMMAND_PREVIEW_LINES, WIDGET_KEY, createWidgetController, sanitizeTerminalText, wrapTerminalText,
+} from "../extension/widget.ts";
 import { commandDetails, createContext, mockTheme } from "./helpers/mocks.ts";
 
 function record(command = "printf 'a' && printf 'b'"): CommandRecord {
@@ -62,11 +64,45 @@ test("command backgrounds preserve complete sanitized text, spaces and graphemes
     const background = appearance === "dark" ? "35;55;80" : "220;235;255";
     for (const width of [1, 7, 40]) {
       const lines = widget.render(width).filter((line) => line.includes(`\u001b[48;2;${background}m`));
-      assert.deepEqual(lines.map(stripTerminalSequences), wrapTerminalText(sanitizeTerminalText(source), width));
+      assert.deepEqual(lines.map(stripTerminalSequences),
+        wrapTerminalText(sanitizeTerminalText(source), width).slice(0, MAX_COMMAND_PREVIEW_LINES));
       for (const line of lines) assert.ok(line.endsWith("\u001b[49m"));
     }
   }
   assert.equal(current.observation.fullCommand, source);
+});
+
+test("command previews cap wrapped content at eight lines without altering the snapshot or other analysis", () => {
+  for (const appearance of ["dark", "light"] as const) {
+    for (const count of [7, 8, 9, 20]) {
+      const source = Array.from({ length: count }, (_, index) => `printf '${index}'`).join("\n");
+      const current = record(source);
+      const widget = new CommandWidget({ ...current, classification: classified("unsafe"),
+        explanation: { status: "complete", text: "Explains the entire command." } }, () => mockTheme(appearance), "alt+m");
+      const lines = widget.render(200);
+      const background = appearance === "dark" ? "35;55;80" : "220;235;255";
+      const command = lines.filter((line) => line.includes(`\u001b[48;2;${background}m`));
+      assert.deepEqual(command.map(stripTerminalSequences), source.split("\n").slice(0, 8));
+      const hint = lines.find((line) => stripTerminalSequences(line).startsWith("Command truncated."));
+      assert.equal(hint !== undefined, count > 8);
+      if (hint) {
+        assert.ok(stripTerminalSequences(hint).includes("Alt+m"));
+        assert.equal(stripTerminalSequences(hint).includes("Alt+c"), false);
+        const yellow = appearance === "dark" ? "255;215;0" : "145;110;0";
+        assert.ok(hint.includes(`\u001b[38;2;${yellow}m`));
+      }
+      assert.ok(lines.map(stripTerminalSequences).includes("⛔  Dangerous"));
+      assert.ok(lines.map(stripTerminalSequences).includes("Explains the entire command."));
+      assert.equal(current.observation.fullCommand, source);
+      assert.equal(widget.snapshot().fullCommand, source);
+      assert.ok(Object.isFrozen(widget.snapshot()));
+    }
+  }
+  const widget = new CommandWidget(record("x".repeat(90)), () => mockTheme());
+  const narrow = widget.render(10);
+  assert.equal(narrow.filter((line) => line.includes("\u001b[48;2;35;55;80m")).length, 8);
+  assert.ok(narrow.map(stripTerminalSequences).join("").includes("Command truncated."));
+  assert.equal(widget.render(200).map(stripTerminalSequences).join("\n").includes("Command truncated."), false);
 });
 
 test("explanation colors depend only on classification, including wrapped text and placeholders", () => {
@@ -204,9 +240,10 @@ test("resize and theme invalidation recompute rendering without stale ANSI color
   assert.deepEqual(widget.render(0), []);
 });
 
-test("widget controller mounts above the editor without focus APIs and updates the existing component", () => {
+test("widget controller mounts above the editor without focus APIs and updates the existing component", (t) => {
   const { ui } = createContext();
   const controller = createWidgetController(ui.ui);
+  t.after(() => controller.dispose());
   controller.show(record());
   const component = ui.components.get(WIDGET_KEY);
   assert.ok(component);

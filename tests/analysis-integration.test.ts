@@ -52,6 +52,39 @@ test("the gate waits for classification, deduplicates pending requests and never
   assert.equal(app.clock.pending, 0);
 });
 
+test("preview truncation and full-command viewing never change model inputs or start additional analysis", async (t) => {
+  const app = setup(blockingConfig);
+  t.after(app.runtime.dispose);
+  const source = Array.from({ length: 40 }, (_, index) => `printf 'model-input-${index}'`).join("\n");
+  const details = commandDetails("long-model-input", source);
+  assert.deepEqual(await app.service.run(details), { kind: "defer" });
+  await flushPromises();
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Command truncated."));
+  assert.equal(app.ui.text(WIDGET_KEY).includes("model-input-39"), false);
+  assert.equal(app.runtime.state.get(details.requestId)?.observation.fullCommand, source);
+  assert.equal(app.models.streams[0]?.context.messages[0]?.content, JSON.stringify({ command: source }));
+  assert.deepEqual(app.models.classifications[0]?.context.state, { command: source });
+  app.ui.input("\u001bc");
+  app.ui.input("\u001b[F");
+  assert.ok(app.ui.overlayText().includes("model-input-39"));
+  const locked = app.ui.overlayText();
+  app.models.classifierResult = async () => riskResponse(1);
+  const denied = commandDetails("later-denied", "printf 'another harmless command'");
+  const verdict = await app.service.run(denied);
+  assert.equal(verdict.kind, "deny");
+  await flushPromises();
+  assert.ok(app.ui.text(WIDGET_KEY).includes("another harmless command"));
+  assert.equal(app.ui.overlayText(), locked);
+  const streams = app.models.streams.length;
+  const classifications = app.models.classifications.length;
+  app.ui.input("\r");
+  app.ui.input("\u001bc");
+  assert.ok(app.ui.overlayText().includes("another harmless command"));
+  assert.equal(app.models.streams.length, streams);
+  assert.equal(app.models.classifications.length, classifications);
+});
+
 test("auto-blocking denies only a validated threshold-unsafe response when explicitly enabled, never allows", async (t) => {
   const cases: [unknown, boolean][] = [
     [riskResponse(), false],
