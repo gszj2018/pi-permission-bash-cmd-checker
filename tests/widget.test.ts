@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
+import type { CommandViewerSource } from "../extension/command-viewer-controller.ts";
 import { SessionState } from "../extension/state.ts";
 import type { ClassificationState, CommandRecord, ExplanationState, RiskLevel } from "../extension/types.ts";
 import {
@@ -242,8 +243,21 @@ test("resize and theme invalidation recompute rendering without stale ANSI color
 
 test("widget controller mounts above the editor without focus APIs and updates the existing component", (t) => {
   const { ui } = createContext();
-  const controller = createWidgetController(ui.ui);
+  const snapshots: string[] = [];
+  let cleared = 0;
+  let disposed = 0;
+  const source: CommandViewerSource = {
+    update(snapshot, owner) { snapshots.push(snapshot.fullCommand); assert.equal(owner, ui.tui); },
+    clear() { cleared++; },
+    dispose() { disposed++; },
+  };
+  const viewer = {
+    createSource: () => source,
+    dispose() { assert.fail("Widget disposal must not dispose the viewer controller."); },
+  };
+  const controller = createWidgetController(ui.ui, viewer);
   t.after(() => controller.dispose());
+  assert.equal(ui.inputHandlers.size, 0);
   controller.show(record());
   const component = ui.components.get(WIDGET_KEY);
   assert.ok(component);
@@ -259,4 +273,10 @@ test("widget controller mounts above the editor without focus APIs and updates t
   assert.equal(ui.mounts.length, 2);
   controller.show(record());
   assert.notEqual(ui.components.get(WIDGET_KEY), component);
+  assert.equal(snapshots.length, 3);
+  assert.equal(cleared, 2);
+  controller.dispose();
+  controller.dispose();
+  assert.equal(disposed, 1);
+  assert.equal(ui.inputHandlers.size, 0);
 });

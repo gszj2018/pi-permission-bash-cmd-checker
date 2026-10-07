@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Authorizer, AuthorizerVerdict, PermissionsService } from "@gotgenes/pi-permission-system";
 import { extractCommandObservation } from "./command.ts";
+import { createCommandViewerController } from "./command-viewer-controller.ts";
 import { SessionState } from "./state.ts";
 import type { AnalysisTask, ClassificationResult, CommandAnalyzer, Config } from "./types.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
@@ -35,7 +36,8 @@ export function attachPermissions(
     notify(ctx, "Session identity unavailable; checker disabled.");
     return inert();
   }
-  const widget = createWidgetController(ctx.ui, config.widget.commandViewerShortcut);
+  const viewer = createCommandViewerController(ctx.ui, config.widget.commandViewerShortcut);
+  const widget = createWidgetController(ctx.ui, viewer, config.widget.commandViewerShortcut);
   const tasks = new Map<string, { controller: AbortController; verdict: Promise<AuthorizerVerdict> }>();
   let boundService: ReturnType<ServiceAccessor>;
   let unregister: (() => void) | undefined;
@@ -149,6 +151,8 @@ export function attachPermissions(
     for (const { controller } of tasks.values()) controller.abort();
     tasks.clear();
     try { widget.dispose(); } catch {}
+    // Extension shutdown owns viewer cleanup; widget disposal alone never closes the overlay.
+    viewer.dispose();
   };
 
   try {
@@ -167,7 +171,8 @@ export function attachPermissions(
         && state.visible?.observation.requestId === raw.requestId) refresh();
     }));
     signal?.addEventListener("abort", dispose, { once: true });
-    bind();
+    if (signal?.aborted) dispose();
+    else bind();
     return { state, dispose };
   } catch {
     dispose();

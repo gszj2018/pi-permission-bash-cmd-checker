@@ -1,9 +1,8 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import {
-  isKeyRelease, isKeyRepeat, matchesKey, type Color, type Component, type KeyId, type OverlayHandle, type TUI,
-} from "@earendil-works/pi-tui";
-import { CommandViewer, type CommandSnapshot } from "./command-viewer.ts";
-import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isShortcutPress, shortcutLabel } from "./shortcut.ts";
+import type { Color, Component, KeyId, TUI } from "@earendil-works/pi-tui";
+import type { CommandSnapshot } from "./command-viewer.ts";
+import type { CommandViewerController } from "./command-viewer-controller.ts";
+import { DEFAULT_COMMAND_VIEWER_SHORTCUT, shortcutLabel } from "./shortcut.ts";
 import { PALETTES, renderCommandText, sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 import type { ClassificationState, CommandRecord, RiskLevel } from "./types.ts";
 
@@ -96,71 +95,20 @@ export interface WidgetController {
   dispose(): void;
 }
 
-interface ViewerInteraction {
-  closeRequested: boolean;
-  component?: CommandViewer;
-  handle?: OverlayHandle;
-}
-
-type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme" | "onTerminalInput">;
+type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme">;
 
 export function createWidgetController(
   ui: WidgetUi,
+  viewer: Pick<CommandViewerController, "createSource">,
   shortcut: KeyId = DEFAULT_COMMAND_VIEWER_SHORTCUT,
 ): WidgetController {
+  const source = viewer.createSource();
   let component: CommandWidget | undefined;
   let tui: TUI | undefined;
-  let viewer: ViewerInteraction | undefined;
-  let closingKey: KeyId | undefined;
   let disposed = false;
-  let unsubscribe: (() => void) | undefined;
-
-  const closeViewer = (interaction = viewer): void => {
-    if (!interaction) return;
-    interaction.closeRequested = true;
-    interaction.component?.dispose();
-    try { interaction.handle?.hide(); } catch {}
-    if (viewer === interaction) viewer = undefined;
-  };
-
-  const openViewer = (snapshot: CommandSnapshot, owner: TUI): void => {
-    const interaction: ViewerInteraction = { closeRequested: false };
-    viewer = interaction;
-    try {
-      interaction.component = new CommandViewer(snapshot, shortcut, () => ui.theme, () => ({
-        width: Math.max(1, Math.floor(owner.terminal.columns * 0.9)),
-        height: Math.max(1, Math.floor(owner.terminal.rows * 0.8)),
-      }), () => owner.requestRender(), (key) => { closingKey = key; closeViewer(interaction); });
-      // Own this public TUI overlay directly: ctx.ui.custom's completion hides the last-created overlay.
-      interaction.handle = owner.showOverlay(interaction.component,
-        { width: "90%", maxHeight: "80%", anchor: "center" });
-      if (disposed || interaction.closeRequested) closeViewer(interaction);
-    } catch { closeViewer(interaction); }
-  };
-
-  try {
-    unsubscribe = ui.onTerminalInput((data) => {
-      if (disposed) return;
-      // A reported held/released close key must not edit or approve the underlying UI after dismissal.
-      if (closingKey && matchesKey(data, closingKey)) {
-        if (isKeyRelease(data)) { closingKey = undefined; return { consume: true }; }
-        if (isKeyRepeat(data)) return { consume: true };
-        closingKey = undefined;
-      }
-      if (matchesKey(data, shortcut)) {
-        if (!viewer && (!component || !tui)) return;
-        if (isShortcutPress(data, shortcut)) {
-          if (viewer) { closingKey = shortcut; closeViewer(); }
-          else if (component && tui) openViewer(component.snapshot(), tui);
-        }
-        return { consume: true };
-      }
-    });
-  } catch {
-    // Input-listener failure must not disable command analysis or permission decisions.
-  }
 
   const hide = (): void => {
+    source.clear();
     if (!component) return;
     component = undefined;
     tui = undefined;
@@ -169,18 +117,21 @@ export function createWidgetController(
   return {
     show(record) {
       if (disposed) return;
-      if (component) {
+      if (component && tui) {
         component.setRecord(record);
-        tui?.requestRender();
+        source.update(component.snapshot(), tui);
+        tui.requestRender();
         return;
       }
       try {
         ui.setWidget(WIDGET_KEY, (owner) => {
           component = new CommandWidget(record, () => ui.theme, shortcut);
           tui = owner;
+          source.update(component.snapshot(), owner);
           return component;
         }, { placement: "aboveEditor" });
       } catch (error) {
+        source.clear();
         component = undefined;
         tui = undefined;
         throw error;
@@ -190,8 +141,7 @@ export function createWidgetController(
     dispose() {
       if (disposed) return;
       disposed = true;
-      try { unsubscribe?.(); } catch {}
-      closeViewer();
+      source.dispose();
       hide();
     },
   };

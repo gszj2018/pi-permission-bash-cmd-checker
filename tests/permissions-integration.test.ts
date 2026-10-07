@@ -382,6 +382,61 @@ test("session end-to-end cleanup is driven by lifecycle shutdown, not agent_end 
   assert.equal(service.current, undefined);
 });
 
+test("session replacement and reload independently dispose the viewer and allow one new viewer", async (t) => {
+  const pi = new MockPi();
+  const service = new MockService();
+  const { ctx, ui } = createContext();
+  registerLifecycle(pi.api, (api, context, signal) => initializeTui(api, context, signal, {
+    loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
+    loadAccessor: async () => () => service.service,
+    createAnalyzer: () => unavailableAnalyzer,
+    attachPermissions,
+  }));
+  t.after(() => pi.emitLifecycle("session_shutdown", ctx, "quit"));
+  let generation = 0;
+  for (const reason of ["startup", "new", "resume", "fork", "reload"]) {
+    await pi.emitLifecycle("session_start", ctx, reason);
+    assert.equal(ui.overlays.length, 0, reason);
+    assert.equal(ui.components.size, 0, reason);
+    assert.equal(ui.inputHandlers.size, 1, reason);
+    const details = commandDetails(`generation-${generation}`, `printf 'generation-${generation}'`);
+    await service.run(details);
+    pi.events.emit("permissions:ui_prompt", promptEvent(details));
+    ui.input("\u001bc");
+    assert.equal(ui.overlays.length, 1, reason);
+    assert.ok(ui.overlayText().includes(`generation-${generation}`), reason);
+    assert.equal(ui.overlayHistory.length, generation + 1, reason);
+    assert.equal(ui.closeCalls, generation, reason);
+    generation++;
+  }
+  await pi.emitLifecycle("session_shutdown", ctx, "quit");
+  assert.equal(ui.overlays.length, 0);
+  assert.equal(ui.components.size, 0);
+  assert.equal(ui.inputHandlers.size, 0);
+  assert.equal(ui.closeCalls, generation);
+});
+
+test("cancellation during viewer input registration releases the independent controller before binding", () => {
+  const pi = new MockPi();
+  const service = new MockService();
+  const { ctx, ui } = createContext();
+  const lifetime = new AbortController();
+  const subscribe = ui.ui.onTerminalInput;
+  ui.ui.onTerminalInput = (handler) => {
+    const unsubscribe = subscribe(handler);
+    lifetime.abort();
+    return unsubscribe;
+  };
+  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service,
+    unavailableAnalyzer, lifetime.signal);
+  assert.equal(runtime.state.active, false);
+  assert.equal(ui.inputHandlers.size, 0);
+  assert.equal(pi.events.size, 0);
+  assert.equal(service.names.length, 0);
+  assert.equal(ui.overlays.length, 0);
+  runtime.dispose();
+});
+
 test("TUI initialization and permission attachment remain inert in non-TUI modes", async () => {
   for (const mode of ["rpc", "json", "print"] as const) {
     const pi = new MockPi();

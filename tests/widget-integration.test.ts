@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
+import { createCommandViewerController } from "../extension/command-viewer-controller.ts";
 import { SessionState } from "../extension/state.ts";
 import { createWidgetController, WIDGET_KEY } from "../extension/widget.ts";
 import { MockUi, commandDetails, flushPromises } from "./helpers/mocks.ts";
@@ -18,9 +19,10 @@ function record(id = "first", command = "printf 'first full command'") {
 
 function setup(t: TestContext, shortcut?: KeyId) {
   const ui = new MockUi();
-  const controller = createWidgetController(ui.ui, shortcut);
-  t.after(() => controller.dispose());
-  return { ui, controller };
+  const viewer = createCommandViewerController(ui.ui, shortcut);
+  const controller = createWidgetController(ui.ui, viewer, shortcut);
+  t.after(() => { controller.dispose(); viewer.dispose(); });
+  return { ui, controller, viewer };
 }
 
 test("toggle opens a focused read-only overlay only for a visible command and preserves ordinary input", async (t) => {
@@ -78,6 +80,55 @@ test("an open viewer retains its command while the widget updates, switches or d
   await flushPromises();
   assert.ok(ui.overlayText().includes("third full command"));
   assert.equal(ui.overlayText().includes("first full command"), false);
+});
+
+test("widget destruction and recreation never own the viewer or its close controls", (t) => {
+  for (const close of [toggle, "\u001b", "q", "\r"]) {
+    const { ui, controller, viewer } = setup(t);
+    controller.show(record());
+    ui.input(toggle);
+    const before = ui.overlayText();
+    controller.dispose();
+    controller.dispose();
+    assert.equal(ui.components.size, 0);
+    assert.equal(ui.inputHandlers.size, 1);
+    assert.equal(ui.overlays.length, 1);
+    assert.equal(ui.overlayText(), before);
+    const replacement = createWidgetController(ui.ui, viewer);
+    t.after(() => replacement.dispose());
+    replacement.show(record("replacement", "printf 'replacement command'"));
+    assert.equal(ui.overlayText(), before);
+    assert.equal(ui.overlayHistory.length, 1);
+    assert.equal(ui.input(close), true);
+    assert.equal(ui.overlays.length, 0);
+    assert.equal(ui.overlayHistory.length, 1);
+    assert.equal(ui.editorInputs.length, 0);
+    ui.input(toggle);
+    assert.equal(ui.overlays.length, 1);
+    assert.equal(ui.overlayHistory.length, 2);
+    assert.ok(ui.overlayText().includes("replacement command"));
+    controller.dispose();
+    assert.equal(ui.overlays.length, 1);
+  }
+});
+
+test("widget disposal during overlay creation cannot cancel the independent viewer", (t) => {
+  const { ui, controller } = setup(t);
+  const original = ui.tui.showOverlay;
+  ui.tui.showOverlay = (component, options) => {
+    controller.dispose();
+    return original(component, options);
+  };
+  controller.show(record());
+  ui.input(toggle);
+  assert.equal(ui.components.size, 0);
+  assert.equal(ui.inputHandlers.size, 1);
+  assert.equal(ui.overlays.length, 1);
+  assert.ok(ui.overlayText().includes("first full command"));
+  ui.input(toggle);
+  assert.equal(ui.overlays.length, 0);
+  assert.equal(ui.overlayHistory.length, 1);
+  assert.equal(ui.input(toggle), false);
 });
 
 test("Escape, q, Enter and the configured shortcut close without forwarding to the editor or reopening", async (t) => {
@@ -182,10 +233,11 @@ test("the scoped handle closes only its viewer beneath a later overlay without r
   assert.equal(other.closed, false);
 });
 
-test("dispose cancels reentrant creation, closes existing viewers and releases input subscriptions exactly once", async (t) => {
-  const { ui, controller } = setup(t);
+test("viewer disposal cancels reentrant creation and releases overlay resources independently of the widget", async (t) => {
+  const { ui, controller, viewer } = setup(t);
   const original = ui.tui.showOverlay;
   ui.tui.showOverlay = (component, options) => {
+    viewer.dispose();
     controller.dispose();
     return original(component, options);
   };
@@ -204,12 +256,15 @@ test("dispose cancels reentrant creation, closes existing viewers and releases i
   mounted.controller.show(record());
   mounted.ui.input(toggle);
   await flushPromises();
-  mounted.controller.dispose();
-  mounted.controller.dispose();
+  mounted.viewer.dispose();
+  mounted.viewer.dispose();
   await flushPromises();
   assert.equal(mounted.ui.closeCalls, 1);
   assert.equal(mounted.ui.inputHandlers.size, 0);
   assert.equal(mounted.ui.overlays.length, 0);
+  assert.ok(mounted.ui.components.has(WIDGET_KEY));
+  mounted.controller.dispose();
+  assert.equal(mounted.ui.components.size, 0);
 });
 
 test("overlay failure is contained and a later shortcut can retry the same visible command", async (t) => {
