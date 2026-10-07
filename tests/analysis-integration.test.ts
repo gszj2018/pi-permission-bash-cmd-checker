@@ -107,7 +107,6 @@ test("automatic denial shows its widget, keeps late explanations and notifies on
   assert.ok(app.ui.text(WIDGET_KEY).includes("Analyzing command…"));
   assert.equal(app.models.streams[1]?.options.signal?.aborted, false);
   assert.equal(app.ui.mounts.length, mounts);
-  assert.equal(app.runtime.state.get(denied.requestId)?.prompted, false);
   assert.equal(app.runtime.state.get(denied.requestId)?.decision, undefined);
   assert.equal(app.runtime.state.size, 2);
   assert.equal(app.ui.notifications.length, 1);

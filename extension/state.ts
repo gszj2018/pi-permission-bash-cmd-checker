@@ -27,7 +27,6 @@ export class SessionState {
       classification: Object.freeze({ status: classificationDisabled ? "disabled" as const : "pending" as const }),
       verdict: Object.freeze({ kind: "defer" as const }),
       verdictSettled: false,
-      prompted: false,
     });
     this.records.set(observation.requestId, record);
     return record;
@@ -62,15 +61,11 @@ export class SessionState {
     return true;
   }
 
-  /** Make a record visible; only a real permission prompt marks it prompted. */
-  show(requestId: string, fromPrompt = true): CommandRecord | undefined {
+  show(requestId: string): CommandRecord | undefined {
     if (this.closed) return undefined;
     const record = this.records.get(requestId);
     this.visibleRequestId = record ? requestId : undefined;
-    if (!record || !fromPrompt) return record;
-    const prompted = Object.freeze({ ...record, prompted: true });
-    this.records.set(requestId, prompted);
-    return prompted;
+    return record;
   }
 
   hide(): void { this.visibleRequestId = undefined; }

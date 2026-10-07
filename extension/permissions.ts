@@ -84,7 +84,7 @@ export function attachPermissions(
         : { kind: "defer" };
       if (state.settleVerdict(record, decision) && decision.kind === "deny") {
         // Automatic denial has no permission prompt, but still displays the cached analysis.
-        state.show(observation.requestId, false);
+        state.show(observation.requestId);
         refresh();
         notify(ctx, "Blocked a bash command assessed as dangerous.");
       }

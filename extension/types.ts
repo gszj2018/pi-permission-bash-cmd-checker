@@ -82,7 +82,6 @@ export interface CommandRecord {
   readonly classification: ClassificationState;
   readonly verdict: AuthorizerVerdict;
   readonly verdictSettled: boolean;
-  readonly prompted: boolean;
   readonly decision?: PermissionOutcome;
 }
 
