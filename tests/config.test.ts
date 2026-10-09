@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  CONFIG_FILE_NAME, DEFAULT_CONFIG, MAX_TIMEOUT_MS, loadConfigFrom, validateConfig,
+  CONFIG_FILE_NAME, DEFAULT_CONFIG, MAX_TIMEOUT_MS, VIEWER_DIRECTORY_PATTERN, loadConfigFrom, validateConfig,
 } from "../extension/config.ts";
 import { COMMAND_VIEWER_SHORTCUT_PATTERN } from "../extension/shortcut.ts";
 
@@ -17,6 +17,7 @@ const expectedDefaults = {
   },
   autoBlockUnsafe: false,
   widget: { commandViewerShortcut: "alt+c" },
+  externalViewer: { command: "code", args: [], mode: "detach", filePath: null },
 };
 
 test("empty config uses the approved defaults and immutable nested values", () => {
@@ -32,6 +33,8 @@ test("empty config uses the approved defaults and immutable nested values", () =
     assert.ok(Object.isFrozen(config.classifier.model));
     assert.ok(Object.isFrozen(config.classifier.thresholds));
     assert.ok(Object.isFrozen(config.widget));
+    assert.ok(Object.isFrozen(config.externalViewer));
+    assert.ok(Object.isFrozen(config.externalViewer.args));
   }
 });
 
@@ -116,6 +119,64 @@ test("command viewer shortcuts default per field and strictly validate without c
   }
 });
 
+test("external viewer fields default independently and preserve literal executable paths and arguments", () => {
+  assert.deepEqual(validateConfig({ externalViewer: {} }), validateConfig({}));
+  const args = ["", "--reuse-window", "a b", "'quoted'", "$(literal); &", "中文"];
+  const directory = join(tmpdir(), "viewer directory.sh");
+  const input = { externalViewer: { command: " C:\\Program Files\\Code.exe ", args, mode: "wait", filePath: directory } };
+  const result = validateConfig(input);
+  assert.equal(result.status, "valid");
+  if (result.status !== "valid") return;
+  assert.deepEqual(result.config.externalViewer, input.externalViewer);
+  assert.deepEqual(result.config.llm, DEFAULT_CONFIG.llm);
+  assert.deepEqual(result.config.classifier, DEFAULT_CONFIG.classifier);
+  assert.notEqual(result.config.externalViewer, input.externalViewer);
+  assert.notEqual(result.config.externalViewer.args, args);
+  assert.ok(Object.isFrozen(result.config.externalViewer));
+  assert.ok(Object.isFrozen(result.config.externalViewer.args));
+  args.push("changed");
+  assert.equal(result.config.externalViewer.args.includes("changed"), false);
+  for (const mode of ["detach", "wait"]) {
+    const partial = validateConfig({ externalViewer: { mode } });
+    assert.equal(partial.status, "valid");
+    if (partial.status === "valid") {
+      assert.deepEqual(partial.config.externalViewer, { ...expectedDefaults.externalViewer, mode });
+    }
+  }
+  const unconfigured = validateConfig({ externalViewer: { command: null, filePath: null } });
+  assert.equal(unconfigured.status, "valid");
+  if (unconfigured.status === "valid") {
+    assert.deepEqual(unconfigured.config.externalViewer, { ...expectedDefaults.externalViewer, command: null });
+  }
+});
+
+const viewerDirectories = ["/tmp/viewer dir", "/", "/tmp/name.sh", "C:\\viewer dir", "D:/viewer",
+  "\\\\server\\share", "\\\\server\\share\\viewer", "/tmp/literal-$VAR"];
+const invalidViewerDirectories: unknown[] = ["", " ", "relative/viewer", ".", "..", "~/viewer", "$TMP/viewer",
+  "C:viewer", "\\viewer", "\\\\server", "/tmp/bad\u0000path", 1, true, undefined, {}, []];
+
+const invalidViewerFields: Record<string, unknown>[] = [
+  { unknown: "secret" },
+  ...["", " \t\n", "code\u0000secret", 1, true, undefined, {}, []].map((command) => ({ command })),
+  ...["--reuse-window", null, undefined, 1, {}, [1], [null], [undefined], ["ok", "bad\u0000"],
+    Array(1)].map((args) => ({ args })),
+  ...["DETACH", "wait ", "", null, undefined, 1, true, {}, []].map((mode) => ({ mode })),
+  ...invalidViewerDirectories.map((filePath) => ({ filePath })),
+];
+
+test("external viewer rejects invalid types, NUL, relative directories and unknown fields without coercion", () => {
+  for (const externalViewer of [null, undefined, [], true, "code", ...invalidViewerFields]) {
+    const result = validateConfig({ externalViewer });
+    assert.equal(result.status, "invalid");
+    if (result.status === "invalid") assert.equal(Object.hasOwn(result, "config"), false);
+  }
+  for (const filePath of viewerDirectories) {
+    const result = validateConfig({ externalViewer: { filePath } });
+    assert.equal(result.status, "valid", filePath);
+    if (result.status === "valid") assert.equal(result.config.externalViewer.filePath, filePath);
+  }
+});
+
 test("threshold and timer boundaries are inclusive", () => {
   const result = validateConfig({
     llm: { timeoutMs: 1 },
@@ -162,6 +223,7 @@ test("config diagnostics contain neither supplied values nor unknown field names
   const secret = "SENSITIVE_CONFIG_MARKER";
   const result = validateConfig({
     [secret]: secret, llm: { timeoutMs: secret, language: secret }, widget: { [secret]: secret, commandViewerShortcut: secret },
+    externalViewer: { [secret]: secret, command: `${secret}\u0000`, args: [`${secret}\u0000`], mode: secret, filePath: secret },
   });
   assert.equal(result.status, "invalid");
   assert.equal(JSON.stringify(result).includes(secret), false);
@@ -173,10 +235,47 @@ test("schema defaults, accepted fields and numeric constraints match the runtime
     new URL("../schemas/bash-cmd-checker.schema.json", import.meta.url), "utf8",
   ));
   assert.equal(schema.additionalProperties, false);
-  assert.deepEqual(Object.keys(schema.properties).sort(), ["$schema", "autoBlockUnsafe", "classifier", "llm", "widget"]);
+  assert.deepEqual(Object.keys(schema.properties).sort(),
+    ["$schema", "autoBlockUnsafe", "classifier", "externalViewer", "llm", "widget"]);
   assert.deepEqual(schema.properties.llm.default, DEFAULT_CONFIG.llm);
   assert.deepEqual(schema.properties.classifier.default, DEFAULT_CONFIG.classifier);
   assert.equal(schema.properties.autoBlockUnsafe.default, DEFAULT_CONFIG.autoBlockUnsafe);
+  const viewer = schema.properties.externalViewer;
+  assert.equal(viewer.type, "object");
+  assert.equal(viewer.additionalProperties, false);
+  assert.deepEqual(viewer.default, DEFAULT_CONFIG.externalViewer);
+  assert.deepEqual(Object.keys(viewer.properties).sort(), ["args", "command", "filePath", "mode"]);
+  for (const key of ["command", "args", "mode", "filePath"] as const) {
+    assert.deepEqual(viewer.properties[key].default, DEFAULT_CONFIG.externalViewer[key]);
+  }
+  assert.deepEqual(viewer.properties.mode.enum, ["detach", "wait"]);
+  assert.equal(viewer.properties.mode.type, "string");
+  assert.equal(viewer.properties.args.type, "array");
+  assert.equal(viewer.properties.args.items.type, "string");
+  const argsPattern = new RegExp(viewer.properties.args.items.pattern);
+  for (const arg of ["", " ", "a b", "$(literal); &", "中文", "\n"]) assert.equal(argsPattern.test(arg), true);
+  assert.equal(argsPattern.test("bad\u0000argument"), false);
+  const commandSchema = viewer.properties.command.anyOf;
+  assert.equal(commandSchema[0].type, "string");
+  assert.deepEqual(commandSchema[1], { type: "null" });
+  const commandPattern = new RegExp(commandSchema[0].pattern);
+  for (const command of ["code", "C:\\Program Files\\Code.exe", " code ", "program\nname"]) {
+    assert.equal(commandPattern.test(command), true);
+    assert.equal(validateConfig({ externalViewer: { command } }).status, "valid");
+  }
+  for (const command of ["", " \t\n", "code\u0000"]) {
+    assert.equal(commandPattern.test(command), false);
+    assert.equal(validateConfig({ externalViewer: { command } }).status, "invalid");
+  }
+  const directorySchema = viewer.properties.filePath.anyOf;
+  assert.equal(directorySchema[0].type, "string");
+  assert.deepEqual(directorySchema[1], { type: "null" });
+  assert.equal(directorySchema[0].pattern, VIEWER_DIRECTORY_PATTERN);
+  const directoryPattern = new RegExp(directorySchema[0].pattern);
+  for (const directory of viewerDirectories) assert.equal(directoryPattern.test(directory), true, directory);
+  for (const directory of invalidViewerDirectories) {
+    if (typeof directory === "string") assert.equal(directoryPattern.test(directory), false, directory);
+  }
   const widget = schema.properties.widget;
   assert.equal(widget.additionalProperties, false);
   assert.deepEqual(widget.default, DEFAULT_CONFIG.widget);

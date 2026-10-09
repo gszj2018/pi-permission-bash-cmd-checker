@@ -89,6 +89,44 @@
         }
       }
     },
+    "externalViewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": { "command": "code", "args": [], "mode": "detach", "filePath": null },
+      "properties": {
+        "command": {
+          "anyOf": [
+            { "type": "string", "pattern": "^(?![\\s\\S]*\\u0000)(?=[\\s\\S]*\\S)[\\s\\S]*(?![\\s\\S])" },
+            { "type": "null" }
+          ],
+          "default": "code",
+          "description": "Executable name or path, resolved through PATH when applicable. Never parsed as a shell command. Null leaves the viewer unconfigured. Windows .cmd launchers require an actual executable instead."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[^\\u0000]*(?![\\s\\S])" },
+          "default": [],
+          "description": "Literal arguments. The absolute command-file path is appended as the last argument. No shell expansion."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["detach", "wait"],
+          "default": "detach",
+          "description": "Detach starts without terminal access or waiting. Wait suspends the Pi TUI and main event loop until the editor exits."
+        },
+        "filePath": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?![\\s\\S]*\\u0000)(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+(?:[\\\\/]|$))[\\s\\S]*(?![\\s\\S])"
+            },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Directory for session command files. Accepts POSIX or Windows absolute-path syntax; it must also be absolute on the running system when opened. Null uses pi-permission-bash-cmd-checker under the system temporary directory. Files use command-<sessionId>.sh, are overwritten per session, and are not automatically deleted."
+        }
+      }
+    },
     "autoBlockUnsafe": {
       "type": "boolean",
       "default": false,

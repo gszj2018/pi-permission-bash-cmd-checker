@@ -1,12 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Config, ConfigLoadResult, ModelReference } from "./types.ts";
+import type { Config, ConfigLoadResult, ExternalViewerConfig, ModelReference } from "./types.ts";
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isCommandViewerShortcut } from "./shortcut.ts";
 import { isNonBlankString, isProbability, isRecord } from "./utils.ts";
 
 export const CONFIG_FILE_NAME = "bash-cmd-checker.json";
 /** Node timers cannot represent larger delays without overflowing. */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** Portable absolute-path syntax; filesystem operations additionally require a native absolute path. */
+export const VIEWER_DIRECTORY_PATTERN =
+  "^(?![\\s\\S]*\\u0000)(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+(?:[\\\\/]|$))[\\s\\S]*(?![\\s\\S])";
+const viewerDirectoryPattern = new RegExp(VIEWER_DIRECTORY_PATTERN);
 
 export const DEFAULT_CONFIG: Config = Object.freeze({
   llm: Object.freeze({ model: null, language: "en", timeoutMs: 30_000 }),
@@ -16,6 +21,7 @@ export const DEFAULT_CONFIG: Config = Object.freeze({
     thresholds: Object.freeze({ safe: 0.5, unsafe: 0.3, confidence: 0.8 }),
   }),
   autoBlockUnsafe: false,
+  externalViewer: Object.freeze({ command: "code", args: Object.freeze([]), mode: "detach", filePath: null }),
   widget: Object.freeze({ commandViewerShortcut: DEFAULT_COMMAND_VIEWER_SHORTCUT }),
 });
 
@@ -64,11 +70,40 @@ function probability(value: unknown, fallback: number, path: string, issues: str
   return fallback;
 }
 
+function externalViewer(value: unknown, issues: string[]): ExternalViewerConfig {
+  const fields = section(value, "externalViewer", issues);
+  checkKeys(fields, ["command", "args", "mode", "filePath"], "externalViewer", issues);
+  let { command, args, mode, filePath } = DEFAULT_CONFIG.externalViewer;
+  if (Object.hasOwn(fields, "command")) {
+    if (fields.command === null || (typeof fields.command === "string"
+      && isNonBlankString(fields.command) && !fields.command.includes("\u0000"))) {
+      command = fields.command;
+    } else issues.push("externalViewer.command: expected a non-blank string without NUL or null.");
+  }
+  if (Object.hasOwn(fields, "args")) {
+    if (Array.isArray(fields.args)
+      && Array.from(fields.args).every((arg) => typeof arg === "string" && !arg.includes("\u0000"))) {
+      args = Object.freeze([...fields.args]);
+    } else issues.push("externalViewer.args: expected an array of strings without NUL.");
+  }
+  if (Object.hasOwn(fields, "mode")) {
+    if (fields.mode === "detach" || fields.mode === "wait") mode = fields.mode;
+    else issues.push("externalViewer.mode: expected detach or wait.");
+  }
+  if (Object.hasOwn(fields, "filePath")) {
+    if (fields.filePath === null || (typeof fields.filePath === "string"
+      && isNonBlankString(fields.filePath) && viewerDirectoryPattern.test(fields.filePath))) {
+      filePath = fields.filePath;
+    } else issues.push("externalViewer.filePath: expected an absolute directory path without NUL or null.");
+  }
+  return Object.freeze({ command, args, mode, filePath });
+}
+
 /** Validate without coercion. Any issue disables the config rather than partially enabling it. */
 export function validateConfig(value: unknown): ConfigValidationResult {
   const issues: string[] = [];
   const root = section(value, "config", issues);
-  checkKeys(root, ["$schema", "llm", "classifier", "autoBlockUnsafe", "widget"], "config", issues);
+  checkKeys(root, ["$schema", "llm", "classifier", "autoBlockUnsafe", "widget", "externalViewer"], "config", issues);
   if (Object.hasOwn(root, "$schema") && typeof root.$schema !== "string") {
     issues.push("$schema: expected a string.");
   }
@@ -118,6 +153,9 @@ export function validateConfig(value: unknown): ConfigValidationResult {
     else issues.push("autoBlockUnsafe: expected a boolean.");
   }
 
+  const viewerConfig = Object.hasOwn(root, "externalViewer")
+    ? externalViewer(root.externalViewer, issues) : DEFAULT_CONFIG.externalViewer;
+
   if (issues.length > 0) return { status: "invalid", issues };
   return {
     status: "valid",
@@ -129,6 +167,7 @@ export function validateConfig(value: unknown): ConfigValidationResult {
         thresholds: Object.freeze(resolvedThresholds),
       }),
       autoBlockUnsafe,
+      externalViewer: viewerConfig,
       widget: Object.freeze({ commandViewerShortcut }),
     }),
   };

@@ -13,6 +13,15 @@ export interface RiskThresholds {
 }
 
 export type ExplanationLanguage = "en" | "zh";
+export type ExternalViewerMode = "detach" | "wait";
+
+export interface ExternalViewerConfig {
+  readonly command: string | null;
+  readonly args: readonly string[];
+  readonly mode: ExternalViewerMode;
+  /** Directory for session command files; null uses the default temporary directory. */
+  readonly filePath: string | null;
+}
 
 export interface Config {
   /** Null selects the current session model at request time. */
@@ -29,6 +38,7 @@ export interface Config {
     readonly thresholds: RiskThresholds;
   };
   readonly autoBlockUnsafe: boolean;
+  readonly externalViewer: ExternalViewerConfig;
   readonly widget: {
     readonly commandViewerShortcut: KeyId;
   };
