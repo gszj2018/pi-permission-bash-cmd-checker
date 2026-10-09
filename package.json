@@ -1,6 +1,6 @@
 {
   "name": "pi-permission-bash-cmd-checker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pi TUI enhancement plugin for @gotgenes/pi-permission-system with bash command explanations and optional risk assessment",
   "keywords": [
     "pi-package",
