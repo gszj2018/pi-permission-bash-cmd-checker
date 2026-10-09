@@ -25,10 +25,10 @@
 
 启用 `autoBlockUnsafe` 后，可自动拦截被判定为危险的命令；该选项默认关闭。
 
-### 3. 命令预览与全文浮窗
+### 3. 命令预览与外部查看
 
 编辑器上方会实时显示命令、风险标识与解释，命令过长时以截断预览呈现。
-按 **Alt+C** 可在只读浮窗中查看完整命令。
+按 **Alt+C** 可在配置的外部查看器中查看完整命令。
 
 ## 安装
 
@@ -66,17 +66,11 @@ pi install git:github.com/gszj2018/pi-permission-bash-cmd-checker
 分析只针对需要批准的 bash 请求（`ask`）；修改配置后请运行 `/reload`。
 如果使用项目级权限配置，请确保实际生效的 chain 也包含 checker。
 
-### 浮窗操作
+### 打开完整命令
 
-| 按键                      | 操作                     |
-|---------------------------|--------------------------|
-| **Alt+C**，或自定义快捷键 | 打开或关闭命令全文浮窗。 |
-| **↑ / ↓**                 | 逐行滚动。               |
-| **PgUp / PgDn**           | 翻页。                   |
-| **Home / End**            | 跳到开头或结尾。         |
-| **Esc / q / Enter**       | 关闭浮窗。               |
-
-fullscreen 模式支持滚轮滚动，regular 模式请使用键盘滚动。
+| 按键                      | 操作                               |
+|---------------------------|------------------------------------|
+| **Alt+C**，或自定义快捷键 | 在配置的外部查看器中查看完整命令。 |
 
 ## 配置
 
@@ -98,6 +92,12 @@ fullscreen 模式支持滚轮滚动，regular 模式请使用键盘滚动。
     "thresholds": { "safe": 0.5, "unsafe": 0.3, "confidence": 0.8 }
   },
   "widget": { "commandViewerShortcut": "alt+c" },
+  "externalViewer": {
+    "command": "code",
+    "args": [],
+    "mode": "detach",
+    "filePath": null
+  },
   "autoBlockUnsafe": false
 }
 ```
@@ -117,8 +117,21 @@ fullscreen 模式支持滚轮滚动，regular 模式请使用键盘滚动。
 | `classifier.thresholds.safe`       | `0.5`                 | 安全类别所需的最低概率。                                                                          |
 | `classifier.thresholds.unsafe`     | `0.3`                 | 危险类别所需的最低概率。                                                                          |
 | `classifier.thresholds.confidence` | `0.8`                 | 接受评估结论所需的最低置信度。                                                                    |
-| `widget.commandViewerShortcut`     | `"alt+c"`             | 打开命令全文浮窗的快捷键。                                                                        |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | 在外部查看器中查看完整命令的快捷键。                                                                        |
+| `externalViewer.command`           | `"code"`              | 查看器可执行文件名或路径。<br>为 null 时不配置查看器。                                            |
+| `externalViewer.args`              | `[]`                  | 传给查看器的字面参数，置于命令文件路径之前。                                                      |
+| `externalViewer.mode`              | `"detach"`            | `detach` 在后台启动查看器；`wait` 暂停 TUI 直到查看器退出。                                        |
+| `externalViewer.filePath`          | `null`                | 会话命令文件所在目录。<br>为 null 时使用系统临时目录下的固定子目录。                              |
 | `autoBlockUnsafe`                  | `false`               | 自动拦截被判定为危险的命令。                                                                      |
+
+### 外部查看器
+
+- 完整命令会保存为会话 `.sh` 文件，同一会话下次打开时覆盖，不会被自动删除；其中可能含有秘密信息，
+  如需只读请在查看器参数中自行指定（例如 nvim 使用 `["-R"]`）。
+- `detach` 下 Pi TUI 保持可用、查看器单独运行，请配置 GUI 编辑器或能自行创建 pane/tab 的启动器；
+  `wait` 下 Pi 会暂停直到查看器退出。
+- Windows 上请配置实际的 `Code.exe` 路径：`code` 通常解析为不受支持的 `code.cmd`，且没有 shell 回退。
+  请只配置编辑器或可信的启动器。
 
 ## 注意事项与限制
 
@@ -152,26 +165,27 @@ pi -e ./extension/index.ts
 ```text
 pi-permission-bash-cmd-checker/
 ├── extension/
-│   ├── index.ts          # 扩展入口（依赖组装）
-│   ├── lifecycle.ts      # TUI 检测、初始化与会话生命周期
-│   ├── config.ts         # 配置读取与严格校验
-│   ├── types.ts          # 共享类型与实现无关契约
-│   ├── utils.ts          # 共享判定函数
-│   ├── command.ts        # 完整 bash 命令提取
-│   ├── utils-pi.ts       # 带前缀的通知与失败兜底
-│   ├── permissions.ts    # 服务绑定、事件解析与 Authorizer 仲裁
-│   ├── analysis.ts       # 并行分析任务、总期限与取消
-│   ├── llm.ts            # 解释模型适配
-│   ├── classifier.ts     # 分类模型适配
-│   ├── risk.ts           # 风险阈值裁决
-│   ├── state.ts          # 会话状态、generation 与记录
-│   ├── widget.ts         # 预览 Widget 与命令来源端口
-│   ├── command-viewer.ts # 锁定全文浮窗与独立控制器
-│   ├── shortcut.ts       # 浮窗快捷键解析
-│   └── terminal-text.ts  # 配色、安全转义与换行
+│   ├── index.ts                # 扩展入口（依赖组装）
+│   ├── lifecycle.ts            # TUI 检测、初始化与会话生命周期
+│   ├── config.ts               # 配置读取与严格校验
+│   ├── types.ts                # 共享类型与实现无关契约
+│   ├── utils.ts                # 共享判定函数
+│   ├── command.ts              # 完整 bash 命令提取
+│   ├── utils-pi.ts             # 带前缀的通知与失败兜底
+│   ├── permissions.ts          # 服务绑定、事件解析与 Authorizer 仲裁
+│   ├── analysis.ts             # 并行分析任务、总期限与取消
+│   ├── llm.ts                  # 解释模型适配
+│   ├── classifier.ts           # 分类模型适配
+│   ├── risk.ts                 # 风险阈值裁决
+│   ├── state.ts                # 会话状态、generation 与记录
+│   ├── widget.ts               # 预览 Widget 与查看器控制器
+│   ├── external-viewer.ts      # 会话命令文件与查看器启动
+│   ├── external-viewer-node.ts # Node 文件系统与进程适配器
+│   ├── shortcut.ts             # 查看器快捷键解析
+│   └── terminal-text.ts        # 配色、安全转义与换行
 ├── schemas/
 │   └── bash-cmd-checker.schema.json
-└── tests/                # 单元测试与集成测试
+└── tests/                      # 单元测试与集成测试
 ```
 
 ## 开源许可

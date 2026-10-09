@@ -26,11 +26,11 @@ A classifier (default: `typesafe/jev-latest`) assesses command risk:
 Set `autoBlockUnsafe` to `true` to block commands assessed as dangerous automatically.
 This option is disabled by default.
 
-### 3. Command Preview and Full-Command Viewer
+### 3. Command Preview and External Viewer
 
 Commands, risk labels, and explanations appear in a live preview above the editor,
 where long commands are shown truncated.
-Press **Alt+C** to open the full command in a read-only overlay.
+Press **Alt+C** to view the complete command in the configured external viewer.
 
 ## Installation
 
@@ -69,17 +69,11 @@ chain is recommended. Analysis covers bash requests that require approval (`ask`
 Run `/reload` after changing the configuration.
 If you use project-level permission settings, make sure the chain in effect also includes the checker.
 
-### Viewer Controls
+### Opening the Full Command
 
-| Key                                    | Action                                 |
-|----------------------------------------|----------------------------------------|
-| **Alt+C**, or your configured shortcut | Open or close the full-command viewer. |
-| **↑ / ↓**                              | Scroll one line.                       |
-| **PgUp / PgDn**                        | Scroll one page.                       |
-| **Home / End**                         | Jump to the start or the end.          |
-| **Esc / q / Enter**                    | Close the viewer.                      |
-
-Mouse-wheel scrolling is available in fullscreen mode; use keyboard scrolling in regular mode.
+| Key                                    | Action                                                      |
+|----------------------------------------|-------------------------------------------------------------|
+| **Alt+C**, or your configured shortcut | Open the complete command in the configured external viewer. |
 
 ## Configuration
 
@@ -101,6 +95,12 @@ All fields are optional. If no configuration file exists, the following defaults
     "thresholds": { "safe": 0.5, "unsafe": 0.3, "confidence": 0.8 }
   },
   "widget": { "commandViewerShortcut": "alt+c" },
+  "externalViewer": {
+    "command": "code",
+    "args": [],
+    "mode": "detach",
+    "filePath": null
+  },
   "autoBlockUnsafe": false
 }
 ```
@@ -120,8 +120,22 @@ JSON Schema. An optional `$schema` field enables schema validation in your edito
 | `classifier.thresholds.safe`       | `0.5`                 | Minimum probability required for a safe category.                                                                          |
 | `classifier.thresholds.unsafe`     | `0.3`                 | Minimum probability required for the unsafe category.                                                                      |
 | `classifier.thresholds.confidence` | `0.8`                 | Minimum confidence required to accept an assessment.                                                                       |
-| `widget.commandViewerShortcut`     | `"alt+c"`             | Shortcut for opening the full-command viewer.                                                                              |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | Shortcut for opening the complete command in the external viewer.                                                                              |
+| `externalViewer.command`           | `"code"`              | Viewer executable name or path.<br>`null` leaves the viewer unconfigured.                                                  |
+| `externalViewer.args`              | `[]`                  | Literal arguments passed to the viewer before the command file path.                                                       |
+| `externalViewer.mode`              | `"detach"`            | `detach` starts the viewer in the background; `wait` suspends the TUI until the viewer exits.                              |
+| `externalViewer.filePath`          | `null`                | Directory for session command files.<br>`null` uses a fixed subdirectory of the system temporary directory.                |
 | `autoBlockUnsafe`                  | `false`               | Automatically block commands assessed as dangerous.                                                                        |
+
+### External Viewer
+
+- The complete command is saved to a session `.sh` file that is overwritten on the next open and is
+  never deleted automatically. It may contain secrets; pass your viewer's read-only arguments (for
+  example `["-R"]` for nvim) if you want it read-only.
+- `detach` keeps the Pi TUI usable and the viewer runs separately, so configure a GUI editor or a
+  launcher that opens its own pane. `wait` suspends Pi until the viewer exits.
+- On Windows, configure the actual `Code.exe` path: `code` usually resolves to `code.cmd`, which is
+  not supported, and there is no shell fallback. Configure only an editor or a trusted launcher.
 
 ## Notes and Limitations
 
@@ -159,26 +173,27 @@ The project uses TypeScript and Node.js's built-in test runner.
 ```text
 pi-permission-bash-cmd-checker/
 ├── extension/
-│   ├── index.ts          # Extension entry point (dependency assembly)
-│   ├── lifecycle.ts      # TUI detection, initialization, and session lifecycle
-│   ├── config.ts         # Configuration loading and strict validation
-│   ├── types.ts          # Shared types and implementation-independent contracts
-│   ├── utils.ts          # Shared predicates
-│   ├── command.ts        # Full bash command extraction
-│   ├── utils-pi.ts       # Prefixed notifications with failure fallback
-│   ├── permissions.ts    # Service binding, event parsing, and arbitration
-│   ├── analysis.ts       # Parallel analysis tasks, deadlines, and cancellation
-│   ├── llm.ts            # Explanation model adapter
-│   ├── classifier.ts     # Classifier model adapter
-│   ├── risk.ts           # Risk threshold decisions
-│   ├── state.ts          # Session state, generations, and records
-│   ├── widget.ts         # Preview widget and command source port
-│   ├── command-viewer.ts # Locked full-command overlay and controller
-│   ├── shortcut.ts       # Viewer shortcut parsing
-│   └── terminal-text.ts  # Colors, safe escaping, and wrapping
+│   ├── index.ts                # Extension entry point (dependency assembly)
+│   ├── lifecycle.ts            # TUI detection, initialization, and session lifecycle
+│   ├── config.ts               # Configuration loading and strict validation
+│   ├── types.ts                # Shared types and implementation-independent contracts
+│   ├── utils.ts                # Shared predicates
+│   ├── command.ts              # Full bash command extraction
+│   ├── utils-pi.ts             # Prefixed notifications with failure fallback
+│   ├── permissions.ts          # Service binding, event parsing, and arbitration
+│   ├── analysis.ts             # Parallel analysis tasks, deadlines, and cancellation
+│   ├── llm.ts                  # Explanation model adapter
+│   ├── classifier.ts           # Classifier model adapter
+│   ├── risk.ts                 # Risk threshold decisions
+│   ├── state.ts                # Session state, generations, and records
+│   ├── widget.ts               # Preview widget and viewer controller
+│   ├── external-viewer.ts      # Session command files and viewer launch
+│   ├── external-viewer-node.ts # Node filesystem and process adapters
+│   ├── shortcut.ts             # Viewer shortcut parsing
+│   └── terminal-text.ts        # Colors, safe escaping, and wrapping
 ├── schemas/
 │   └── bash-cmd-checker.schema.json
-└── tests/                # Unit and integration tests
+└── tests/                      # Unit and integration tests
 ```
 
 ## License
