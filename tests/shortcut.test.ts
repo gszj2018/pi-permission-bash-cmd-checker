@@ -5,7 +5,7 @@ import {
   isShortcutPress, shortcutLabel,
 } from "../extension/shortcut.ts";
 
-const toggle = "\u001b[59;5u";
+const press = "\u001b[59;5u";
 
 test("shortcut syntax preserves canonical Pi identifiers and rejects invalid or repeated modifiers", () => {
   const schemaPattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
@@ -26,7 +26,7 @@ test("shortcut syntax preserves canonical Pi identifiers and rejects invalid or 
   assert.equal(shortcutLabel("alt+ctrl+v"), "Alt+Ctrl+v");
 });
 
-test("every supported base key requires at least one modifier to toggle the viewer", () => {
+test("every supported base key requires at least one modifier to launch the viewer", () => {
   const pattern = new RegExp(COMMAND_VIEWER_SHORTCUT_PATTERN);
   const baseKeys = [
     ..."abcdefghijklmnopqrstuvwxyz0123456789`=[]\\;'.,/!@#$%^&*()_|~{}:<>?-",
@@ -56,18 +56,18 @@ test("excluded base keys cannot be configured as viewer shortcuts, even with mod
   }
 });
 
-test("toggle matching requires the actual combination and ignores key repeat and release without global protocol changes", () => {
+test("shortcut matching requires the actual combination and ignores key repeat and release without global protocol changes", () => {
   assert.equal(DEFAULT_COMMAND_VIEWER_SHORTCUT, "alt+c");
   assert.equal(isShortcutPress("\u001bc", DEFAULT_COMMAND_VIEWER_SHORTCUT), true);
   assert.equal(isShortcutPress("\u001b[99;3u", DEFAULT_COMMAND_VIEWER_SHORTCUT), true);
   assert.equal(isShortcutPress("c", DEFAULT_COMMAND_VIEWER_SHORTCUT), false);
   assert.equal(isShortcutPress("\u001b[99;3:2u", DEFAULT_COMMAND_VIEWER_SHORTCUT), false);
   assert.equal(isShortcutPress("\u001b[99;3:3u", DEFAULT_COMMAND_VIEWER_SHORTCUT), false);
-  assert.equal(isShortcutPress(toggle, "ctrl+;"), true);
+  assert.equal(isShortcutPress(press, "ctrl+;"), true);
   assert.equal(isShortcutPress(";", "ctrl+;"), false);
   assert.equal(isShortcutPress("\u001b[59;5:2u", "ctrl+;"), false);
   assert.equal(isShortcutPress("\u001b[59;5:3u", "ctrl+;"), false);
   assert.equal(isShortcutPress("\u001bm", "alt+m"), true);
-  assert.equal(isShortcutPress(toggle, "alt+m"), false);
+  assert.equal(isShortcutPress(press, "alt+m"), false);
   assert.equal(isShortcutPress("\u001b[61;6u", "ctrl+shift+="), true);
 });

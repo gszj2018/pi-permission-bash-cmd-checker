@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { attachPermissions } from "./permissions.ts";
 import type { CommandAnalyzer, Config, ConfigLoadResult, ServiceAccessor } from "./types.ts";
 import { notifyError, notifyWarning } from "./utils-pi.ts";
+import type { ExternalViewerDependencies } from "./widget.ts";
 
 export type TuiInitializer = (
   pi: ExtensionAPI,
@@ -13,6 +14,7 @@ export interface TuiDependencies {
   loadConfig(): Promise<ConfigLoadResult>;
   loadAccessor(): Promise<ServiceAccessor>;
   createAnalyzer(ctx: ExtensionContext, config: Config): CommandAnalyzer;
+  readonly externalViewer: ExternalViewerDependencies;
   attachPermissions: typeof attachPermissions;
 }
 
@@ -76,5 +78,7 @@ export async function initializeTui(
   }
   if (signal.aborted) return noop;
   const analyzer = dependencies.createAnalyzer(ctx, loaded.config);
-  return dependencies.attachPermissions(pi, ctx, loaded.config, getService, analyzer, signal).dispose;
+  return dependencies.attachPermissions(
+    pi, ctx, loaded.config, getService, analyzer, dependencies.externalViewer, signal,
+  ).dispose;
 }

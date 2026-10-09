@@ -1,10 +1,14 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Color, Component, KeyId, TUI } from "@earendil-works/pi-tui";
-import { DEFAULT_COMMAND_VIEWER_SHORTCUT, shortcutLabel } from "./shortcut.ts";
+import { matchesKey, type Color, type Component, type KeyId, type TUI } from "@earendil-works/pi-tui";
+import {
+  launchExternalViewer, prepareCommandFile, type ViewerFileDependencies, type ViewerProcessDependencies,
+} from "./external-viewer.ts";
+import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isShortcutPress, shortcutLabel } from "./shortcut.ts";
 import { PALETTES, renderCommandText, sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 import type {
-  ClassificationState, CommandRecord, CommandSnapshot, CommandViewerController, RiskLevel,
+  ClassificationState, CommandRecord, CommandSnapshot, ExternalViewerConfig, RiskLevel,
 } from "./types.ts";
+import { notifyError, notifyWarning } from "./utils-pi.ts";
 
 export { sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 
@@ -34,6 +38,13 @@ function riskDisplay(classification: ClassificationState): { text: string; color
     : classification.risk === "unsafe" ? "red" : "yellow";
   return { text: RISK_TEXT[classification.risk], color };
 }
+
+export interface ExternalViewerDependencies {
+  readonly files: ViewerFileDependencies;
+  readonly processes: ViewerProcessDependencies;
+}
+
+type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme" | "custom" | "onTerminalInput" | "notify">;
 
 /** Non-interactive component: never owns focus or handles terminal input. */
 export class CommandWidget implements Component {
@@ -95,20 +106,51 @@ export interface WidgetController {
   dispose(): void;
 }
 
-type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme">;
-
 export function createWidgetController(
   ui: WidgetUi,
-  viewer: Pick<CommandViewerController, "createSource">,
+  sessionId: string,
+  viewerConfig: ExternalViewerConfig,
+  dependencies: ExternalViewerDependencies,
   shortcut: KeyId = DEFAULT_COMMAND_VIEWER_SHORTCUT,
 ): WidgetController {
-  const source = viewer.createSource();
   let component: CommandWidget | undefined;
   let tui: TUI | undefined;
   let disposed = false;
+  let busy = false;
+  let unsubscribe: (() => void) | undefined;
+
+  const open = async (snapshot: CommandSnapshot): Promise<void> => {
+    busy = true;
+    try {
+      if (viewerConfig.command === null) {
+        notifyWarning(ui, "No external viewer command is configured.");
+        return;
+      }
+      let path: string;
+      try { path = prepareCommandFile(sessionId, viewerConfig.filePath, snapshot.fullCommand, dependencies.files); } catch {
+        if (!disposed) notifyError(ui, "Failed to prepare the command file for the external viewer.");
+        return;
+      }
+      const result = await launchExternalViewer(ui, viewerConfig, path, dependencies.processes);
+      if (disposed) return;
+      if (result === "failed") notifyError(ui, "Failed to run the external viewer.");
+      else if (result === "terminal-failed") {
+        notifyError(ui, "Failed to restore the terminal after running the external viewer.");
+      } else if (result === "unconfigured") notifyWarning(ui, "No external viewer command is configured.");
+    } catch {
+      if (!disposed) notifyError(ui, "Failed to run the external viewer.");
+    } finally { busy = false; }
+  };
+
+  try {
+    unsubscribe = ui.onTerminalInput((data) => {
+      if (disposed || !component || !matchesKey(data, shortcut)) return;
+      if (!busy && isShortcutPress(data, shortcut)) void open(component.snapshot());
+      return { consume: true };
+    });
+  } catch { notifyError(ui, "Failed to register external viewer input handling."); }
 
   const hide = (): void => {
-    source.clear();
     if (!component) return;
     component = undefined;
     tui = undefined;
@@ -117,21 +159,19 @@ export function createWidgetController(
   return {
     show(record) {
       if (disposed) return;
-      if (component && tui) {
-        component.setRecord(record);
-        source.update(component.snapshot(), tui);
-        tui.requestRender();
-        return;
-      }
       try {
+        if (component && tui) {
+          component.setRecord(record);
+          tui.requestRender();
+          return;
+        }
         ui.setWidget(WIDGET_KEY, (owner) => {
+          if (disposed) return { render: () => [], invalidate() {} };
           component = new CommandWidget(record, () => ui.theme, shortcut);
           tui = owner;
-          source.update(component.snapshot(), owner);
           return component;
         }, { placement: "aboveEditor" });
       } catch (error) {
-        source.clear();
         component = undefined;
         tui = undefined;
         throw error;
@@ -141,7 +181,8 @@ export function createWidgetController(
     dispose() {
       if (disposed) return;
       disposed = true;
-      source.dispose();
+      try { unsubscribe?.(); } catch {}
+      unsubscribe = undefined;
       hide();
     },
   };

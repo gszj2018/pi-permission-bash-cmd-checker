@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
-import { createCommandViewerController } from "../extension/command-viewer.ts";
+import { DEFAULT_CONFIG } from "../extension/config.ts";
+import { commandFilePath } from "../extension/external-viewer.ts";
 import { SessionState } from "../extension/state.ts";
+import type { ExternalViewerConfig } from "../extension/types.ts";
 import { createWidgetController, WIDGET_KEY } from "../extension/widget.ts";
+import { MockExternalViewer } from "./helpers/external-viewer.ts";
 import { MockUi, commandDetails, flushPromises } from "./helpers/mocks.ts";
 
-const toggle = "\u001bc";
+const shortcut = "\u001bc";
 
 function record(id = "first", command = "printf 'first full command'") {
   const observation = extractCommandObservation(commandDetails(id, command));
@@ -17,267 +20,342 @@ function record(id = "first", command = "printf 'first full command'") {
   return result;
 }
 
-function setup(t: TestContext, shortcut?: KeyId) {
+function setup(t: TestContext, config: Partial<ExternalViewerConfig> = {}, key?: KeyId) {
   const ui = new MockUi();
-  const viewer = createCommandViewerController(ui.ui, shortcut);
-  const controller = createWidgetController(ui.ui, viewer, shortcut);
-  t.after(() => { controller.dispose(); viewer.dispose(); });
-  return { ui, controller, viewer };
+  const external = new MockExternalViewer();
+  const viewerConfig = { ...DEFAULT_CONFIG.externalViewer, ...config };
+  const controller = createWidgetController(ui.ui, "serving-session", viewerConfig, external.dependencies, key);
+  const path = commandFilePath("serving-session", config.filePath ?? null, () => external.root);
+  t.after(() => { controller.dispose(); external.close(); });
+  return { ui, external, controller, viewerConfig, path };
 }
 
-test("toggle opens a focused read-only overlay only for a visible command and preserves ordinary input", async (t) => {
-  const { ui, controller } = setup(t);
-  assert.equal(ui.input(toggle), false);
-  assert.equal(ui.overlays.length, 0);
-  controller.show(record());
-  const ordinaryInputsBeforeOpening = [";", "c", "q", " ", "\t", "\r", "\u007f", "\u001b[D", "\u001b[C",
-    "\u001b[3~", "\u001b[2~", "\u001b[E"];
-  for (const input of ordinaryInputsBeforeOpening) assert.equal(ui.input(input), false, input);
-  assert.deepEqual(ui.editorInputs.slice(-ordinaryInputsBeforeOpening.length), ordinaryInputsBeforeOpening);
-  assert.equal(ui.input("\u001b[99;3:2u"), true);
-  assert.equal(ui.input("\u001b[99;3:3u"), true);
-  assert.equal(ui.overlayHistory.length, 0);
-  const ordinaryInputs = ui.editorInputs.length;
-  assert.equal(ui.input(toggle), true);
+test("the controller owns one input listener while only a visible widget consumes the actual shortcut", async (t) => {
+  const app = setup(t);
+  assert.equal(app.ui.inputHandlers.size, 1);
+  assert.equal(app.ui.input(shortcut), false);
+  assert.equal(app.external.files.size, 0);
+  assert.equal(app.external.directories.size, 0);
+  assert.equal(app.external.calls.length, 0);
+  app.controller.show(record());
+  for (const data of ["c", "q", "\r", "\u001b", "x", " ", "\t", "\u007f", "\u001b[D"]) {
+    assert.equal(app.ui.input(data), false, JSON.stringify(data));
+  }
+  for (const data of ["\u001b[99;3:2u", "\u001b[99;3:3u"]) assert.equal(app.ui.input(data), true);
+  assert.equal(app.external.calls.length, 0);
+  assert.equal(app.ui.input(shortcut), true);
   await flushPromises();
-  assert.equal(ui.overlays.length, 1);
-  assert.equal(ui.overlays[0]!.handle.isFocused(), true);
-  assert.deepEqual(ui.overlays[0]!.options, { width: "90%", maxHeight: "80%", anchor: "center" });
-  assert.ok(ui.overlayText().includes("first full command"));
-  assert.ok(ui.overlayText().includes("Esc/q/Enter/Alt+c Close"));
-  ui.input("x");
-  assert.equal(ui.editorInputs.length, ordinaryInputs);
-  ui.input("\r");
-  await flushPromises();
-  assert.equal(ui.overlays.length, 0);
-  assert.equal(ui.editorInputs.length, ordinaryInputs);
-  assert.equal(ui.input("q"), false);
+  assert.equal(app.external.files.get(app.path), "printf 'first full command'");
+  assert.equal(app.external.calls.length, 1);
+  assert.equal(app.ui.customCalls, 0);
+  assert.equal(app.ui.stopped, false);
+  app.controller.hide();
+  assert.equal(app.ui.inputHandlers.size, 1);
+  assert.equal(app.ui.input(shortcut), false);
+  app.controller.show(record("new", "new command"));
+  assert.equal(app.ui.inputHandlers.size, 1);
+  app.controller.dispose();
+  assert.equal(app.ui.inputHandlers.size, 0);
+  assert.equal(app.ui.notifications.length, 0);
 });
 
-test("an open viewer retains its command while the widget updates, switches or disappears", async (t) => {
-  const { ui, controller } = setup(t);
+test("four-line previews keep complete raw UTF-8 files and custom shortcuts also open short commands", async (t) => {
+  const app = setup(t, {}, "alt+m");
+  const source = `  printf '中😀e\u0301'\n\n${Array.from({ length: 40 }, (_, index) => `printf 'line-${index}'`).join("\n")}\n\u001b[2J  `;
+  app.controller.show(record("long", source));
+  const preview = app.ui.text(WIDGET_KEY);
+  assert.ok(preview.includes("Command truncated. Press Alt+m to view the full command."));
+  assert.equal(preview.includes("line-39"), false);
+  assert.equal(app.ui.input(shortcut), false);
+  assert.equal(app.ui.input("\u001bm"), true);
+  await flushPromises();
+  assert.equal(app.external.files.get(app.path), source);
+  assert.equal(app.external.calls[0]!.args.at(-1), app.path);
+  assert.equal(app.ui.customCalls, 0);
+  assert.equal(app.ui.overlays.length, 0);
+  app.controller.show(record("short", "short command"));
+  app.ui.input("\u001bm");
+  await flushPromises();
+  assert.equal(app.external.files.get(app.path), "short command");
+  assert.equal(app.external.calls.length, 2);
+});
+
+test("unconfigured commands warn only on effective presses and never prepare a file", async (t) => {
+  const app = setup(t, { command: null });
+  app.ui.input(shortcut);
+  assert.equal(app.ui.notifications.length, 0);
+  app.controller.show(record());
+  app.ui.input("\u001b[99;3:2u");
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.deepEqual(app.ui.notifications, [{
+    message: "[bash-cmd-checker] No external viewer command is configured.", type: "warning",
+  }]);
+  assert.equal(app.external.files.size, 0);
+  assert.equal(app.external.directories.size, 0);
+  assert.equal(app.external.calls.length, 0);
+});
+
+test("busy suppresses reentrant writes and presses without queuing; each later press captures the current record", async (t) => {
+  const app = setup(t);
+  app.external.automaticSpawn = false;
+  app.controller.show(record());
+  const write = app.external.fileDependencies.fileSystem.writeFileSync;
+  app.external.fileDependencies.fileSystem.writeFileSync = (...args) => {
+    write(...args);
+    app.controller.show(record("second", "printf 'second'"));
+    assert.equal(app.ui.input(shortcut), true);
+    assert.equal(app.ui.input("ordinary"), false);
+  };
+  app.ui.input(shortcut);
+  assert.equal(app.external.files.get(app.path), "printf 'first full command'");
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.equal(app.external.calls.length, 1);
+  app.external.children[0]!.emit("spawn");
+  await flushPromises();
+  assert.equal(app.external.calls.length, 1);
+  app.external.fileDependencies.fileSystem.writeFileSync = write;
+  app.ui.input(shortcut);
+  assert.equal(app.external.files.get(app.path), "printf 'second'");
+  assert.equal(app.external.calls.length, 2);
+  app.external.children[1]!.emit("spawn");
+  await flushPromises();
+});
+
+test("widget updates and hide/remount never rewrite a pending snapshot, release busy or restore a hidden command", async (t) => {
+  const app = setup(t);
+  app.external.automaticSpawn = false;
   const first = record();
-  controller.show(first);
-  ui.input(toggle);
-  await flushPromises();
-  const before = ui.overlayText();
-  controller.show({ ...first, explanation: { status: "complete", text: "Later explanation." },
+  app.controller.show(first);
+  app.ui.input(shortcut);
+  app.controller.show({ ...first, explanation: { status: "complete", text: "Later explanation." },
     decision: { result: "allow", resolution: "user_approved" } });
-  assert.equal(ui.overlayText(), before);
-  controller.show(record("second", "printf 'second full command'"));
-  assert.ok(ui.text(WIDGET_KEY).includes("second full command"));
-  assert.equal(ui.overlayText(), before);
-  controller.hide();
-  assert.equal(ui.components.size, 0);
-  assert.equal(ui.overlays.length, 1);
-  assert.equal(ui.overlayText(), before);
-  ui.input(toggle);
+  app.controller.hide();
+  assert.equal(app.ui.components.size, 0);
+  assert.equal(app.ui.inputHandlers.size, 1);
+  assert.equal(app.ui.input(shortcut), false);
+  app.controller.show(record("second", "second command"));
+  app.ui.input(shortcut);
+  assert.equal(app.external.calls.length, 1);
+  app.external.children[0]!.emit("spawn");
   await flushPromises();
-  assert.equal(ui.overlays.length, 0);
-  assert.equal(ui.closeCalls, 1);
-  controller.show(record("third", "printf 'third full command'"));
-  ui.input(toggle);
+  assert.equal(app.external.files.get(app.path), first.observation.fullCommand);
+  app.ui.input(shortcut);
+  app.external.children[1]!.emit("spawn");
   await flushPromises();
-  assert.ok(ui.overlayText().includes("third full command"));
-  assert.equal(ui.overlayText().includes("first full command"), false);
+  assert.equal(app.external.files.get(app.path), "second command");
+  app.controller.hide();
+  assert.equal(app.ui.input(shortcut), false);
 });
 
-test("widget destruction and recreation never own the viewer or its close controls", (t) => {
-  for (const close of [toggle, "\u001b", "q", "\r"]) {
-    const { ui, controller, viewer } = setup(t);
-    controller.show(record());
-    ui.input(toggle);
-    const before = ui.overlayText();
-    controller.dispose();
-    controller.dispose();
-    assert.equal(ui.components.size, 0);
-    assert.equal(ui.inputHandlers.size, 1);
-    assert.equal(ui.overlays.length, 1);
-    assert.equal(ui.overlayText(), before);
-    const replacement = createWidgetController(ui.ui, viewer);
-    t.after(() => replacement.dispose());
-    replacement.show(record("replacement", "printf 'replacement command'"));
-    assert.equal(ui.overlayText(), before);
-    assert.equal(ui.overlayHistory.length, 1);
-    assert.equal(ui.input(close), true);
-    assert.equal(ui.overlays.length, 0);
-    assert.equal(ui.overlayHistory.length, 1);
-    assert.equal(ui.editorInputs.length, 0);
-    ui.input(toggle);
-    assert.equal(ui.overlays.length, 1);
-    assert.equal(ui.overlayHistory.length, 2);
-    assert.ok(ui.overlayText().includes("replacement command"));
-    controller.dispose();
-    assert.equal(ui.overlays.length, 1);
-  }
+test("widget runtime disposal during file writing cannot cancel an already triggered external flow", async (t) => {
+  const app = setup(t);
+  app.controller.show(record());
+  const write = app.external.fileDependencies.fileSystem.writeFileSync;
+  app.external.fileDependencies.fileSystem.writeFileSync = (...args) => { write(...args); app.controller.dispose(); };
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.equal(app.ui.components.size, 0);
+  assert.equal(app.ui.inputHandlers.size, 0);
+  assert.equal(app.external.calls.length, 1);
+  assert.equal(app.external.children[0]!.unrefs, 1);
+  assert.equal(app.ui.input(shortcut), false);
+  assert.equal(app.external.files.get(app.path), "printf 'first full command'");
 });
 
-test("widget disposal during overlay creation cannot cancel the independent viewer", (t) => {
-  const { ui, controller } = setup(t);
-  const original = ui.tui.showOverlay;
-  ui.tui.showOverlay = (component, options) => {
-    controller.dispose();
-    return original(component, options);
-  };
-  controller.show(record());
-  ui.input(toggle);
-  assert.equal(ui.components.size, 0);
-  assert.equal(ui.inputHandlers.size, 1);
-  assert.equal(ui.overlays.length, 1);
-  assert.ok(ui.overlayText().includes("first full command"));
-  ui.input(toggle);
-  assert.equal(ui.overlays.length, 0);
-  assert.equal(ui.overlayHistory.length, 1);
-  assert.equal(ui.input(toggle), false);
-});
-
-test("Escape, q, Enter and the configured shortcut close without forwarding to the editor or reopening", async (t) => {
-  for (const key of ["\u001b", "q", "\r", "\u001b[13u", "\u001bm"]) {
-    const { ui, controller } = setup(t, "alt+m");
-    controller.show(record());
-    assert.equal(ui.input(toggle), false);
-    ui.input("\u001bm");
+test("failed widget mounts and redraws disable viewing until a successful later show restores the new command", async (t) => {
+  for (const failure of ["mount", "render"] as const) {
+    const app = setup(t);
+    const mount = app.ui.ui.setWidget;
+    const render = app.ui.tui.requestRender.bind(app.ui.tui);
+    if (failure === "mount") {
+      app.ui.ui.setWidget = (key, content, options) => {
+        if (typeof content === "function") mount(key, content, options);
+        else mount(key, content, options);
+        throw new Error("MOCK_WIDGET_ERROR");
+      };
+    } else {
+      app.controller.show(record());
+      app.ui.tui.requestRender = () => { throw new Error("MOCK_RENDER_ERROR"); };
+    }
+    assert.throws(() => app.controller.show(record("failed", "failed command")));
+    assert.equal(app.ui.input(shortcut), false);
+    assert.equal(app.external.calls.length, 0);
+    app.ui.ui.setWidget = mount;
+    app.ui.tui.requestRender = render;
+    app.controller.show(record("recovered", "recovered command"));
+    app.ui.input(shortcut);
     await flushPromises();
-    assert.ok(ui.overlayText().includes("Esc/q/Enter/Alt+m Close"));
-    const before = ui.editorInputs.length;
-    ui.input(key);
+    assert.equal(app.external.files.get(app.path), "recovered command");
+    assert.equal(app.ui.inputHandlers.size, 1);
+  }
+});
+
+test("file preparation failures suppress sensitive details, skip spawn and release busy for a retry", async (t) => {
+  for (const operation of ["mkdirSync", "writeFileSync"] as const) {
+    const app = setup(t);
+    app.controller.show(record());
+    const original = { ...app.external.fileDependencies.fileSystem };
+    app.external.fileDependencies.fileSystem[operation] = () => { throw new Error("SENSITIVE_FILE_ERROR"); };
+    assert.doesNotThrow(() => app.ui.input(shortcut));
     await flushPromises();
-    assert.equal(ui.overlays.length, 0);
-    assert.equal(ui.overlayHistory.length, 1);
-    assert.equal(ui.closeCalls, 1);
-    assert.equal(ui.editorInputs.length, before);
+    assert.equal(app.external.calls.length, 0);
+    assert.equal(app.external.handles.size, 0);
+    assert.deepEqual(app.ui.notifications, [{
+      message: "[bash-cmd-checker] Failed to prepare the command file for the external viewer.", type: "error",
+    }]);
+    Object.assign(app.external.fileDependencies.fileSystem, original);
+    app.ui.input(shortcut);
+    await flushPromises();
+    assert.equal(app.external.calls.length, 1);
   }
 });
 
-test("reported repeats and releases of closing keys cannot reach the underlying editor after dismissal", (t) => {
-  const cases = [
-    ["\u001b", "\u001b[27;1:2u", "\u001b[27;1:3u"],
-    ["q", "\u001b[113;1:2u", "\u001b[113;1:3u"],
-    ["\r", "\u001b[13;1:2u", "\u001b[13;1:3u"],
-    [toggle, "\u001b[99;3:2u", "\u001b[99;3:3u"],
-  ];
-  for (const [press, repeat, release] of cases) {
-    const { ui, controller } = setup(t);
-    controller.show(record());
-    ui.input(toggle);
-    ui.input(press!);
-    assert.equal(ui.overlays.length, 0);
-    assert.equal(ui.input(repeat!), true);
-    assert.equal(ui.input(release!), true);
-    assert.equal(ui.editorInputs.length, 0);
-    assert.equal(ui.input("q"), false);
+test("detached startup errors notify safely and release busy for retry", async (t) => {
+  for (const failure of ["throw", "error"] as const) {
+    const app = setup(t);
+    app.controller.show(record());
+    const spawn = app.external.processDependencies.spawn;
+    if (failure === "throw") app.external.processDependencies.spawn = () => { throw new Error("SENSITIVE_SPAWN_ERROR"); };
+    else app.external.automaticSpawn = false;
+    app.ui.input(shortcut);
+    if (failure === "error") app.external.children[0]!.emit("error", new Error("SENSITIVE_SPAWN_ERROR"));
+    await flushPromises();
+    assert.deepEqual(app.ui.notifications, [{
+      message: "[bash-cmd-checker] Failed to run the external viewer.", type: "error",
+    }]);
+    app.external.processDependencies.spawn = spawn;
+    app.external.automaticSpawn = true;
+    const count = app.external.calls.length;
+    app.ui.input(shortcut);
+    await flushPromises();
+    assert.equal(app.external.calls.length, count + 1);
   }
 });
 
-test("keyboard scrolling reaches the entire captured command beyond the four-line preview", async (t) => {
-  const { ui, controller } = setup(t);
-  const source = Array.from({ length: 70 }, (_, index) => `printf 'line-${index}'`).join("\n");
-  controller.show(record("long", source));
-  assert.ok(ui.text(WIDGET_KEY).includes("Command truncated. Press Alt+c"));
-  assert.equal(ui.text(WIDGET_KEY).includes("line-69"), false);
-  ui.input(toggle);
+test("wait gets the current custom TUI rather than the widget owner captured before a terminal mode change", async (t) => {
+  const app = setup(t, { mode: "wait" });
+  app.controller.show(record());
+  const current = new MockUi();
+  app.ui.ui.custom = current.ui.custom;
+  app.ui.input(shortcut);
   await flushPromises();
-  ui.input("\u001b[F");
-  assert.ok(ui.overlayText().includes("line-69"));
-  assert.equal(ui.overlayText().includes("line-0'"), false);
-  ui.input("\u001b[H");
-  assert.ok(ui.overlayText().includes("line-0'"));
-  assert.equal(ui.overlayText().includes("line-69"), false);
+  assert.deepEqual(app.ui.terminalSteps, []);
+  assert.deepEqual(current.terminalSteps, ["stop", "start", "render"]);
+  assert.equal(current.customMounts, 0);
+  assert.equal(app.external.calls[0]!.mode, "wait");
 });
 
-test("rapid open and close never dismisses the underlying interaction", async (t) => {
-  const { ui, controller } = setup(t);
-  let closeOther!: () => void;
-  const otherResult = ui.ui.custom<void>((_tui, _theme, _keys, done) => {
-    closeOther = () => { done(undefined); };
-    return { render: () => ["Underlying dialog"], invalidate() {} };
-  }, { overlay: true });
-  t.after(() => closeOther());
-  void otherResult.then(() => {});
-  await flushPromises();
-  const other = ui.overlays[0]!;
-  controller.show(record());
-  ui.input(toggle);
-  ui.input(toggle);
-  assert.equal(other.closed, false);
-  assert.equal(ui.overlays.length, 1);
-  await flushPromises();
-  assert.equal(other.closed, false);
-  assert.equal(ui.overlays.length, 1);
-  assert.equal(ui.overlays[0], other);
-  assert.equal(ui.closeCalls, 1);
-});
-
-test("the scoped handle closes only its viewer beneath a later overlay without relying on creation or focus order", async (t) => {
-  const { ui, controller } = setup(t);
-  controller.show(record());
-  ui.input(toggle);
-  await flushPromises();
-  let closeOther!: () => void;
-  const otherResult = ui.ui.custom<void>((_tui, _theme, _keys, done) => {
-    closeOther = () => { done(undefined); };
-    return { render: () => ["Later overlay"], invalidate() {} };
-  }, { overlay: true });
-  void otherResult.then(() => {});
-  t.after(() => closeOther());
-  await flushPromises();
-  const other = ui.overlays.at(-1)!;
-  const own = ui.overlays[0]!;
-  own.handle.focus();
-  assert.equal(ui.overlays.at(-1), other);
-  assert.equal(own.handle.isFocused(), true);
-  ui.input(toggle);
-  await flushPromises();
-  assert.equal(ui.overlays.length, 1);
-  assert.equal(ui.overlays[0], other);
-  assert.equal(other.closed, false);
-});
-
-test("viewer disposal cancels reentrant creation and releases overlay resources independently of the widget", async (t) => {
-  const { ui, controller, viewer } = setup(t);
-  const original = ui.tui.showOverlay;
-  ui.tui.showOverlay = (component, options) => {
-    viewer.dispose();
-    controller.dispose();
-    return original(component, options);
+test("wait keeps busy during handoff, restores before notifying and permits a later retry", async (t) => {
+  const app = setup(t, { command: "nvim", args: ["-R"], mode: "wait" });
+  app.controller.show(record());
+  const spawn = app.external.processDependencies.spawnSync;
+  app.external.processDependencies.spawnSync = (...args) => {
+    assert.equal(app.ui.stopped, true);
+    app.ui.input(shortcut);
+    spawn(...args);
+    return { status: 7, signal: null };
   };
-  controller.show(record());
-  ui.input(toggle);
+  const notify = app.ui.ui.notify;
+  app.ui.ui.notify = (...args) => { assert.equal(app.ui.stopped, false); notify(...args); };
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.equal(app.external.calls.length, 1);
+  assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
+  assert.equal(app.ui.customMounts, 0);
+  assert.deepEqual(app.ui.notifications, [{ message: "[bash-cmd-checker] Failed to run the external viewer.", type: "error" }]);
+  app.external.processDependencies.spawnSync = spawn;
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.equal(app.external.calls.length, 2);
+});
+
+test("wait completes synchronously without mounting a viewer or dismissing a permission overlay", async (t) => {
+  const app = setup(t, { command: "nvim", args: ["-R"], mode: "wait" });
+  let closePermission!: () => void;
+  const permission = app.ui.ui.custom<void>((_tui, _theme, _keys, done) => {
+    closePermission = () => { done(undefined); };
+    return { render: () => ["Permission dialog"], invalidate() {} };
+  }, { overlay: true });
+  t.after(async () => { closePermission(); await permission; });
+  await flushPromises();
+  const dialog = app.ui.overlays[0]!;
+  app.controller.show(record());
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.equal(app.external.calls.length, 1);
+  assert.deepEqual(app.ui.overlays, [dialog]);
+  assert.equal(dialog.closed, false);
+  assert.equal(app.ui.customMounts, 1);
+  assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
+  app.controller.dispose();
+  assert.equal(dialog.closed, false);
+});
+
+test("terminal recovery errors have a fixed notification and notification failures cannot escape", async (t) => {
+  const app = setup(t, { mode: "wait" });
+  app.controller.show(record());
+  const start = app.ui.tui.start.bind(app.ui.tui);
+  app.ui.tui.start = () => { start(); throw new Error("SENSITIVE_TERMINAL_ERROR"); };
+  app.ui.input(shortcut);
+  await flushPromises();
+  assert.deepEqual(app.ui.notifications, [{
+    message: "[bash-cmd-checker] Failed to restore the terminal after running the external viewer.", type: "error",
+  }]);
+  app.ui.ui.notify = () => { throw new Error("SENSITIVE_NOTIFY_ERROR"); };
+  assert.doesNotThrow(() => app.ui.input(shortcut));
+  await flushPromises();
+  assert.equal(app.external.calls.length, 2);
+});
+
+test("controller disposal releases input once and suppresses late notifications without cancelling startup", async (t) => {
+  for (const event of ["spawn", "error"] as const) {
+    const app = setup(t);
+    app.external.automaticSpawn = false;
+    app.controller.show(record());
+    app.ui.input(shortcut);
+    const handler = [...app.ui.inputHandlers][0]!;
+    app.controller.dispose();
+    app.controller.dispose();
+    app.controller.show(record("stale", "stale command"));
+    assert.equal(handler(shortcut), undefined);
+    assert.equal(app.ui.input(shortcut), false);
+    app.external.children[0]!.emit(event, new Error("SENSITIVE_LATE_ERROR"));
+    await flushPromises();
+    assert.equal(app.external.calls.length, 1);
+    assert.equal(app.external.children[0]!.unrefs, event === "spawn" ? 1 : 0);
+    assert.equal(app.external.files.get(app.path), "printf 'first full command'");
+    assert.equal(app.ui.notifications.length, 0);
+  }
+});
+
+test("input registration errors do not escape and reentrant or throwing cleanup remains idempotent", (t) => {
+  const ui = new MockUi();
+  const external = new MockExternalViewer();
+  const subscribe = ui.ui.onTerminalInput;
+  let cleanupCalls = 0;
+  ui.ui.onTerminalInput = (handler) => {
+    const unsubscribe = subscribe(handler);
+    return () => {
+      cleanupCalls++;
+      assert.equal(handler(shortcut), undefined);
+      unsubscribe();
+      throw new Error("SENSITIVE_UNSUBSCRIBE_ERROR");
+    };
+  };
+  const controller = createWidgetController(ui.ui, "session", DEFAULT_CONFIG.externalViewer, external.dependencies);
+  t.after(() => { controller.dispose(); external.close(); });
   controller.dispose();
-  assert.equal(ui.inputHandlers.size, 0);
-  assert.equal(ui.components.size, 0);
-  assert.equal(ui.overlayHistory.length, 1);
-  assert.equal(ui.overlays.length, 0);
-  assert.equal(ui.closeCalls, 1);
-  controller.show(record());
-  assert.equal(ui.components.size, 0);
-
-  const mounted = setup(t);
-  mounted.controller.show(record());
-  mounted.ui.input(toggle);
-  await flushPromises();
-  mounted.viewer.dispose();
-  mounted.viewer.dispose();
-  await flushPromises();
-  assert.equal(mounted.ui.closeCalls, 1);
-  assert.equal(mounted.ui.inputHandlers.size, 0);
-  assert.equal(mounted.ui.overlays.length, 0);
-  assert.ok(mounted.ui.components.has(WIDGET_KEY));
-  mounted.controller.dispose();
-  assert.equal(mounted.ui.components.size, 0);
-});
-
-test("overlay failure is contained and a later shortcut can retry the same visible command", async (t) => {
-  const { ui, controller } = setup(t);
-  controller.show(record());
-  ui.overlayError = new Error("SENSITIVE_UI_ERROR");
-  ui.input(toggle);
-  await flushPromises();
-  assert.equal(ui.overlays.length, 0);
-  assert.ok(ui.components.has(WIDGET_KEY));
-  assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_UI_ERROR"), false);
-  ui.overlayError = undefined;
-  ui.input(toggle);
-  await flushPromises();
-  assert.ok(ui.overlayText().includes("first full command"));
+  controller.dispose();
+  assert.equal(cleanupCalls, 1);
+  ui.ui.onTerminalInput = () => { throw new Error("SENSITIVE_INPUT_ERROR"); };
+  const failed = createWidgetController(ui.ui, "failed", DEFAULT_CONFIG.externalViewer, external.dependencies);
+  t.after(failed.dispose);
+  assert.deepEqual(ui.notifications, [{
+    message: "[bash-cmd-checker] Failed to register external viewer input handling.", type: "error",
+  }]);
+  failed.show(record());
+  assert.equal(ui.input(shortcut), false);
+  assert.equal(external.calls.length, 0);
 });

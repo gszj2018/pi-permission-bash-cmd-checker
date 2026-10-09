@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_CONFIG } from "../extension/config.ts";
 import { initializeTui, registerLifecycle } from "../extension/lifecycle.ts";
 import { SessionState } from "../extension/state.ts";
+import { MockExternalViewer } from "./helpers/external-viewer.ts";
 import { MockPi, createContext, deferred, flushPromises, unavailableAnalyzer } from "./helpers/mocks.ts";
 
 test("lifecycle does not initialize features in non-TUI modes, even when RPC reports hasUI", async () => {
@@ -27,6 +28,7 @@ test("TUI initialization forwards explicit dependencies to the injected permissi
   const state = new SessionState();
   const accessor = () => undefined;
   const analyzer = unavailableAnalyzer;
+  const external = new MockExternalViewer();
   let attached = 0;
   let disposed = 0;
   const cleanup = await initializeTui(pi.api, ctx, controller.signal, {
@@ -37,13 +39,15 @@ test("TUI initialization forwards explicit dependencies to the injected permissi
       assert.equal(config, DEFAULT_CONFIG);
       return analyzer;
     },
-    attachPermissions(api, context, config, getService, analyze, signal) {
+    externalViewer: external.dependencies,
+    attachPermissions(api, context, config, getService, analyze, viewerDependencies, signal) {
       attached++;
       assert.equal(api, pi.api);
       assert.equal(context, ctx);
       assert.equal(config, DEFAULT_CONFIG);
       assert.equal(getService, accessor);
       assert.equal(analyze, analyzer);
+      assert.equal(viewerDependencies, external.dependencies);
       assert.equal(signal, controller.signal);
       return { state, dispose: () => { disposed++; state.close(); } };
     },
@@ -51,6 +55,8 @@ test("TUI initialization forwards explicit dependencies to the injected permissi
   assert.equal(attached, 1);
   assert.equal(pi.events.size, 0);
   assert.equal(ui.mounts.length, 0);
+  assert.equal(external.files.size, 0);
+  assert.equal(external.calls.length, 0);
   cleanup();
   assert.equal(disposed, 1);
   assert.equal(state.active, false);
@@ -133,6 +139,7 @@ test("a thrown config loader reports an error without continuing initialization"
     loadConfig: async () => { throw new Error("SENSITIVE_CONFIG_ERROR"); },
     loadAccessor: async () => { assert.fail("Must not load the accessor after config failure."); },
     createAnalyzer: () => { assert.fail("Must not create an analyzer after config failure."); },
+    externalViewer: new MockExternalViewer().dependencies,
     attachPermissions: () => { assert.fail("Must not attach after config failure."); },
   });
   cleanup();

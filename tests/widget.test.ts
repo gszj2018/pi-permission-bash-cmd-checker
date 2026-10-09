@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { extractCommandObservation } from "../extension/command.ts";
+import { DEFAULT_CONFIG } from "../extension/config.ts";
 import { SessionState } from "../extension/state.ts";
 import type {
-  ClassificationState, CommandRecord, CommandViewerSource, ExplanationState, RiskLevel,
+  ClassificationState, CommandRecord, ExplanationState, RiskLevel,
 } from "../extension/types.ts";
 import {
   CommandWidget, MAX_COMMAND_PREVIEW_LINES, WIDGET_KEY, createWidgetController, sanitizeTerminalText, wrapTerminalText,
 } from "../extension/widget.ts";
+import { MockExternalViewer } from "./helpers/external-viewer.ts";
 import { commandDetails, createContext, mockTheme } from "./helpers/mocks.ts";
 
 function record(command = "printf 'a' && printf 'b'"): CommandRecord {
@@ -88,7 +90,8 @@ test("command previews cap wrapped content at four lines without altering the sn
       const hint = lines.find((line) => stripTerminalSequences(line).startsWith("Command truncated."));
       assert.equal(hint !== undefined, count > 4);
       if (hint) {
-        assert.ok(stripTerminalSequences(hint).includes("Alt+m"));
+        assert.equal(stripTerminalSequences(hint),
+          "Command truncated. Press Alt+m to view the full command.");
         assert.equal(stripTerminalSequences(hint).includes("Alt+c"), false);
         const yellow = appearance === "dark" ? "255;215;0" : "145;110;0";
         assert.ok(hint.includes(`\u001b[38;2;${yellow}m`));
@@ -252,21 +255,10 @@ test("resize and theme invalidation recompute rendering without stale ANSI color
 
 test("widget controller mounts above the editor without focus APIs and updates the existing component", (t) => {
   const { ui } = createContext();
-  const snapshots: string[] = [];
-  let cleared = 0;
-  let disposed = 0;
-  const source: CommandViewerSource = {
-    update(snapshot, owner) { snapshots.push(snapshot.fullCommand); assert.equal(owner, ui.tui); },
-    clear() { cleared++; },
-    dispose() { disposed++; },
-  };
-  const viewer = {
-    createSource: () => source,
-    dispose() { assert.fail("Widget disposal must not dispose the viewer controller."); },
-  };
-  const controller = createWidgetController(ui.ui, viewer);
-  t.after(() => controller.dispose());
-  assert.equal(ui.inputHandlers.size, 0);
+  const external = new MockExternalViewer();
+  const controller = createWidgetController(ui.ui, "session-1", DEFAULT_CONFIG.externalViewer, external.dependencies);
+  t.after(() => { controller.dispose(); external.close(); });
+  assert.equal(ui.inputHandlers.size, 1);
   controller.show(record());
   const component = ui.components.get(WIDGET_KEY);
   assert.ok(component);
@@ -282,10 +274,10 @@ test("widget controller mounts above the editor without focus APIs and updates t
   assert.equal(ui.mounts.length, 2);
   controller.show(record());
   assert.notEqual(ui.components.get(WIDGET_KEY), component);
-  assert.equal(snapshots.length, 3);
-  assert.equal(cleared, 2);
+  assert.equal(ui.inputHandlers.size, 1);
+  assert.equal(external.files.size, 0);
+  assert.equal(external.calls.length, 0);
   controller.dispose();
   controller.dispose();
-  assert.equal(disposed, 1);
   assert.equal(ui.inputHandlers.size, 0);
 });

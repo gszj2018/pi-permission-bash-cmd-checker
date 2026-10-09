@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG } from "../extension/config.ts";
 import { attachPermissions } from "../extension/permissions.ts";
 import type { Config } from "../extension/types.ts";
 import { WIDGET_KEY } from "../extension/widget.ts";
+import { MockExternalViewer } from "./helpers/external-viewer.ts";
 import { MockPi, MockService, commandDetails, deferred, flushPromises, promptEvent } from "./helpers/mocks.ts";
 import { createModelContext, explanationResponse, MockClock, modelAnalyzer, riskResponse } from "./helpers/models.ts";
 
@@ -12,8 +13,10 @@ function setup(config: Config = DEFAULT_CONFIG) {
   const service = new MockService();
   const { ctx, models, ui } = createModelContext();
   const clock = new MockClock();
-  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, modelAnalyzer(ctx, config, clock));
-  return { pi, service, ctx, models, ui, clock, runtime };
+  const external = new MockExternalViewer();
+  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, modelAnalyzer(ctx, config, clock),
+    external.dependencies);
+  return { pi, service, ctx, models, ui, clock, runtime, external };
 }
 
 const blockingConfig = { ...DEFAULT_CONFIG, autoBlockUnsafe: true };
@@ -145,21 +148,25 @@ test("preview truncation and full-command viewing never change model inputs or s
   assert.equal(app.models.streams[0]?.context.messages[0]?.content, JSON.stringify({ command: source }));
   assert.deepEqual(app.models.classifications[0]?.context.state, { command: source });
   app.ui.input("\u001bc");
-  app.ui.input("\u001b[F");
-  assert.ok(app.ui.overlayText().includes("model-input-39"));
-  const locked = app.ui.overlayText();
+  await flushPromises();
+  const path = app.external.calls[0]!.args.at(-1)!;
+  assert.equal(app.external.files.get(path), source);
+  assert.equal(app.models.streams.length, 1);
+  assert.equal(app.models.classifications.length, 1);
   app.models.classifierResult = async () => riskResponse(1);
   const denied = commandDetails("later-denied", "printf 'another harmless command'");
   const verdict = await app.service.run(denied);
   assert.equal(verdict.kind, "deny");
   await flushPromises();
   assert.ok(app.ui.text(WIDGET_KEY).includes("another harmless command"));
-  assert.equal(app.ui.overlayText(), locked);
+  assert.equal(app.external.files.get(path), source);
   const streams = app.models.streams.length;
   const classifications = app.models.classifications.length;
-  app.ui.input("\r");
   app.ui.input("\u001bc");
-  assert.ok(app.ui.overlayText().includes("another harmless command"));
+  await flushPromises();
+  assert.equal(app.external.files.get(path), "printf 'another harmless command'");
+  assert.equal(app.external.calls.length, 2);
+  assert.equal(app.ui.customCalls, 0);
   assert.equal(app.models.streams.length, streams);
   assert.equal(app.models.classifications.length, classifications);
 });
@@ -380,7 +387,7 @@ test("session replacement cancels pending arbitration and suppresses stale resul
   const next = createModelContext();
   const nextClock = new MockClock();
   const fresh = attachPermissions(app.pi.api, next.ctx, blockingConfig, () => app.service.service,
-    modelAnalyzer(next.ctx, blockingConfig, nextClock));
+    modelAnalyzer(next.ctx, blockingConfig, nextClock), new MockExternalViewer().dependencies);
   try {
     assert.deepEqual(await app.service.run(details), { kind: "defer" });
     app.pi.events.emit("permissions:ui_prompt", promptEvent(details));

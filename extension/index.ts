@@ -2,6 +2,7 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { createAnalyzer, scheduleDeadline } from "./analysis.ts";
 import { classifyCommand } from "./classifier.ts";
 import { loadConfigFrom } from "./config.ts";
+import { nodeViewerFileDependencies, nodeViewerProcessDependencies } from "./external-viewer-node.ts";
 import { initializeTui, registerLifecycle } from "./lifecycle.ts";
 import { explainCommand } from "./llm.ts";
 import { attachPermissions } from "./permissions.ts";
@@ -23,6 +24,7 @@ export default function setup(pi: ExtensionAPI): void {
           schedule: scheduleDeadline,
         });
       },
+      externalViewer: { files: nodeViewerFileDependencies, processes: nodeViewerProcessDependencies },
       attachPermissions,
     });
   });

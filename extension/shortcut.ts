@@ -2,8 +2,8 @@ import { isKeyRelease, isKeyRepeat, matchesKey, type KeyId } from "@earendil-wor
 
 export const DEFAULT_COMMAND_VIEWER_SHORTCUT: KeyId = "alt+c";
 
-// Require at least one non-repeated modifier; bare keys must not toggle the viewer.
-// Exclude escape/esc, clear and function keys from configuration; Escape remains a fixed viewer close key.
+// Require at least one non-repeated modifier; bare keys must not launch the viewer.
+// Exclude escape/esc, clear and function keys from configuration.
 // Omit '+' as a base key because the host splits identifiers on '+'; use explicit shift+= instead.
 export const COMMAND_VIEWER_SHORTCUT_PATTERN =
   "^(?!.*\\b(ctrl|alt|shift|super)\\+.*\\b\\1\\+)" +
@@ -17,7 +17,7 @@ export function isCommandViewerShortcut(value: unknown): value is KeyId {
   return typeof value === "string" && shortcutPattern.test(value);
 }
 
-/** A held or released toggle key must not immediately reopen or close the viewer. */
+/** A held or released shortcut must not launch the external viewer. */
 export function isShortcutPress(data: string, shortcut: KeyId): boolean {
   return !isKeyRelease(data) && !isKeyRepeat(data) && matchesKey(data, shortcut);
 }

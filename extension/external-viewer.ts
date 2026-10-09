@@ -1,7 +1,5 @@
-import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, constants, lstatSync, mkdirSync, openSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { ExternalViewerConfig } from "./types.ts";
@@ -29,18 +27,6 @@ export interface ViewerFileDependencies {
   readonly fileSystem: ViewerFileSystem;
   temporaryDirectory(): string;
 }
-
-/** Only function references are assembled here; importing the module performs no filesystem operations. */
-export const nodeViewerFileDependencies: ViewerFileDependencies = {
-  fileSystem: {
-    lstatSync,
-    mkdirSync: (path, options) => { mkdirSync(path, options); },
-    openSync,
-    writeFileSync,
-    closeSync,
-  },
-  temporaryDirectory: tmpdir,
-};
 
 export function commandFileName(sessionId: string): string {
   if (!isNonBlankString(sessionId)) throw new Error("Session identity unavailable.");
@@ -117,13 +103,6 @@ export interface ViewerProcessDependencies {
   }): { status: number | null; signal: string | null; error?: Error };
   writeTerminal(text: string): void;
 }
-
-/** These adapters are inert until explicitly called by a user-triggered operation. */
-export const nodeViewerProcessDependencies: ViewerProcessDependencies = {
-  spawn: (command, args, options) => spawn(command, [...args], options),
-  spawnSync: (command, args, options) => spawnSync(command, [...args], options),
-  writeTerminal: (text) => { process.stdout.write(text); },
-};
 
 export type ViewerLaunchResult = "started" | "completed" | "failed" | "terminal-failed" | "unconfigured";
 

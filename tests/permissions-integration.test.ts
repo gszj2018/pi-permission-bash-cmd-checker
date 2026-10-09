@@ -5,18 +5,21 @@ import { initializeTui, registerLifecycle, type TuiDependencies } from "../exten
 import { attachPermissions } from "../extension/permissions.ts";
 import type { AnalysisUpdate, ClassificationResult, CommandAnalyzer } from "../extension/types.ts";
 import { WIDGET_KEY } from "../extension/widget.ts";
+import { MockExternalViewer } from "./helpers/external-viewer.ts";
 import {
   MockPi, MockService, commandDetails, createContext, deferred, flushPromises,
   mockBackgroundAnalyzer, promptEvent, unavailableAnalyzer,
 } from "./helpers/mocks.ts";
 
-function setup(analyzer: CommandAnalyzer) {
+function setup(analyzer: CommandAnalyzer, external = new MockExternalViewer()) {
   const pi = new MockPi();
   const service = new MockService();
   const { ctx, ui } = createContext();
   const lifetime = new AbortController();
-  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service, analyzer, lifetime.signal);
-  return { pi, service, ctx, ui, lifetime, runtime };
+  const runtime = attachPermissions(
+    pi.api, ctx, DEFAULT_CONFIG, () => service.service, analyzer, external.dependencies, lifetime.signal,
+  );
+  return { pi, service, ctx, ui, lifetime, runtime, external };
 }
 
 function decision(requestId: string, result: "allow" | "deny" = "allow") {
@@ -112,7 +115,7 @@ test("UI prompts associate by requestId only, without comparing event projection
   assert.equal(app.runtime.state.size, 1);
 });
 
-test("forwarded evidence and child identity are shown by the serving TUI session", async (t) => {
+test("forwarded evidence and child identity are shown and saved using the serving TUI session file", async (t) => {
   const app = setup(unavailableAnalyzer);
   t.after(app.runtime.dispose);
   const details = commandDetails();
@@ -125,6 +128,12 @@ test("forwarded evidence and child identity are shown by the serving TUI session
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   assert.ok(app.ui.text(WIDGET_KEY).includes("Requester: Worker · Session: child"));
   assert.ok(app.ui.text(WIDGET_KEY).includes(details.payload.evidence[0]!.text));
+  app.ui.input("\u001bc");
+  await flushPromises();
+  const path = app.external.calls[0]!.args.at(-1)!;
+  assert.ok(path.endsWith("command-session-1.sh"));
+  assert.equal(app.external.files.get(path), details.payload.evidence[0]!.text);
+  assert.equal(path.includes("command-child.sh"), false);
 });
 
 test("ready is session-scoped, handles both load orders, and replaces services without duplicate registration", (t) => {
@@ -136,6 +145,7 @@ test("ready is session-scoped, handles both load orders, and replaces services w
   const lookedUp: string[] = [];
   const runtime = attachPermissions(
     pi.api, ctx, DEFAULT_CONFIG, (id) => { lookedUp.push(id); return available?.service; }, unavailableAnalyzer,
+    new MockExternalViewer().dependencies,
   );
   t.after(runtime.dispose);
   pi.events.emit("permissions:ready", { sessionId: "other-session" });
@@ -152,7 +162,8 @@ test("ready is session-scoped, handles both load orders, and replaces services w
   runtime.dispose();
   assert.equal(second.releases, 1);
   assert.equal(pi.events.size, 0);
-  const early = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => first.service, unavailableAnalyzer);
+  const early = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => first.service, unavailableAnalyzer,
+    new MockExternalViewer().dependencies);
   assert.equal(first.names.length, 2);
   early.dispose();
 });
@@ -162,7 +173,7 @@ test("registration failures report errors without exposing raw exception details
   const { ctx, ui } = createContext();
   const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => ({
     registerAuthorizer() { throw new Error("SENSITIVE_REGISTRATION_ERROR"); },
-  }), unavailableAnalyzer);
+  }), unavailableAnalyzer, new MockExternalViewer().dependencies);
   pi.events.emit("permissions:ready", { sessionId: "session-1" });
   assert.equal(ui.notifications.length, 1);
   assert.equal(ui.notifications[0]?.message.includes("SENSITIVE_REGISTRATION_ERROR"), false);
@@ -178,7 +189,8 @@ test("event subscription failures clean up partial setup and report an error", (
     if (channel === "permissions:ui_prompt") throw new Error("SENSITIVE_EVENT_ERROR");
     return on(channel, handler);
   };
-  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => undefined, unavailableAnalyzer);
+  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => undefined, unavailableAnalyzer,
+    new MockExternalViewer().dependencies);
   assert.equal(runtime.state.active, false);
   assert.equal(pi.events.size, 0);
   assert.equal(ui.inputHandlers.size, 0);
@@ -203,7 +215,8 @@ test("shutdown aborts in-flight work, clears the cache and suppresses late updat
   assert.equal(app.runtime.state.size, 0);
   assert.equal(app.ui.components.size, 0);
   assert.equal(app.pi.events.size, 0);
-  const fresh = attachPermissions(app.pi.api, app.ctx, DEFAULT_CONFIG, () => app.service.service, unavailableAnalyzer);
+  const fresh = attachPermissions(app.pi.api, app.ctx, DEFAULT_CONFIG, () => app.service.service, unavailableAnalyzer,
+    app.external.dependencies);
   await app.service.run(details);
   app.pi.events.emit("permissions:ui_prompt", promptEvent(details));
   publish({ kind: "explanation", value: { status: "complete", text: "Stale result" } });
@@ -246,7 +259,8 @@ test("explicitly disabled classification remains yellow and defers even with aut
   const service = new MockService();
   const { ctx, ui } = createContext();
   const config = { ...DEFAULT_CONFIG, classifier: { ...DEFAULT_CONFIG.classifier, model: null }, autoBlockUnsafe: true };
-  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, unavailableAnalyzer);
+  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, unavailableAnalyzer,
+    new MockExternalViewer().dependencies);
   const details = commandDetails();
   assert.deepEqual(await service.run(details), { kind: "defer" });
   await flushPromises();
@@ -256,88 +270,106 @@ test("explicitly disabled classification remains yellow and defers even with aut
   runtime.dispose();
 });
 
-test("only valid permission prompts close the viewer, preserving analysis, decisions and reopening", async (t) => {
+test("permission prompts update or hide sources without managing external editors or rewriting their files", async (t) => {
   const jobs = new Map<string, { publish: (update: AnalysisUpdate) => void; done: ReturnType<typeof deferred<void>> }>();
   const app = setup(mockBackgroundAnalyzer(async (command, _signal, publish) => {
     const done = deferred<void>();
     jobs.set(command.requestId, { publish, done });
     return done.promise;
   }));
-  t.after(() => { app.runtime.dispose(); for (const job of jobs.values()) job.done.resolve(); });
+  t.after(() => { app.runtime.dispose(); app.external.close(); for (const job of jobs.values()) job.done.resolve(); });
   const source = Array.from({ length: 40 }, (_, index) => `printf 'first-${index}'`).join("\n");
-  const first = commandDetails("locked-first", source);
+  const first = commandDetails("captured-first", source);
   assert.deepEqual(await app.service.run(first), { kind: "defer" });
   app.pi.events.emit("permissions:ui_prompt", promptEvent(first));
-  assert.equal(app.runtime.state.get(first.requestId)?.observation.fullCommand, source);
   assert.equal(app.ui.text(WIDGET_KEY).includes("first-39"), false);
   app.ui.input("\u001bc");
   await flushPromises();
-  app.ui.input("\u001b[F");
-  const locked = app.ui.overlayText();
-  assert.ok(locked.includes("first-39"));
+  const path = app.external.calls[0]!.args.at(-1)!;
+  assert.equal(app.external.files.get(path), source);
   app.pi.events.emit("permissions:decision", decision(first.requestId));
   jobs.get(first.requestId)!.publish({ kind: "explanation", value: { status: "complete", text: "Later explanation." } });
-  assert.equal(app.ui.overlayText(), locked);
   const second = commandDetails("live-second", "printf 'second command'");
   await app.service.run(second);
-  assert.equal(app.ui.overlayText(), locked);
   app.pi.events.emit("permissions:ui_prompt", { requestId: "" });
-  assert.equal(app.ui.overlayText(), locked);
-  assert.equal(app.ui.closeCalls, 0);
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
   app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
   assert.ok(app.ui.text(WIDGET_KEY).includes("second command"));
-  assert.equal(app.ui.overlays.length, 0);
-  assert.equal(app.ui.closeCalls, 1);
-  assert.equal(app.ui.inputHandlers.size, 1);
-  app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
-  assert.equal(app.ui.closeCalls, 1);
+  assert.equal(app.external.files.get(path), source);
+  assert.equal(app.external.calls.length, 1);
+  assert.equal(app.external.children[0]!.unrefs, 1);
   app.ui.input("\u001bc");
-  assert.ok(app.ui.overlayText().includes("second command"));
+  await flushPromises();
+  assert.equal(app.external.files.get(path), "printf 'second command'");
   app.pi.events.emit("permissions:ui_prompt", { requestId: "unobserved" });
   assert.equal(app.ui.components.size, 0);
-  assert.equal(app.ui.overlays.length, 0);
-  assert.equal(app.ui.closeCalls, 2);
-  assert.equal(app.ui.editorInputs.length, 0);
+  assert.equal(app.ui.input("\u001bc"), false);
+  assert.equal(app.external.calls.length, 2);
+  assert.equal(app.external.files.get(path), "printf 'second command'");
   assert.equal(app.runtime.state.get(first.requestId)?.decision?.result, "allow");
   app.pi.events.emit("permissions:ui_prompt", promptEvent(second));
   app.ui.input("\u001bc");
   await flushPromises();
-  assert.ok(app.ui.overlayText().includes("second command"));
+  assert.equal(app.external.calls.length, 3);
   app.lifetime.abort();
-  await flushPromises();
-  assert.equal(app.ui.overlays.length, 0);
+  assert.equal(app.external.files.get(path), "printf 'second command'");
   assert.equal(app.ui.inputHandlers.size, 0);
   assert.equal(app.runtime.state.active, false);
 });
 
-test("permission attachment injects the configured viewer shortcut and isolates UI failures", async (t) => {
+test("permission attachment injects the configured shortcut and contains file or process failures without changing verdicts", async (t) => {
+  for (const failure of ["file", "spawn"] as const) {
+    const pi = new MockPi();
+    const service = new MockService();
+    const { ctx, ui } = createContext();
+    const external = new MockExternalViewer();
+    const config = { ...DEFAULT_CONFIG, widget: { commandViewerShortcut: "alt+m" as const } };
+    const runtime = attachPermissions(pi.api, ctx, config, () => service.service, unavailableAnalyzer, external.dependencies);
+    t.after(() => { runtime.dispose(); external.close(); });
+    const details = commandDetails();
+    assert.deepEqual(await service.run(details), { kind: "defer" });
+    const write = external.fileDependencies.fileSystem.writeFileSync;
+    const spawn = external.processDependencies.spawn;
+    if (failure === "file") external.fileDependencies.fileSystem.writeFileSync = () => { throw new Error("SENSITIVE_FILE_ERROR"); };
+    else external.processDependencies.spawn = () => { throw new Error("SENSITIVE_SPAWN_ERROR"); };
+    assert.equal(ui.input("\u001bc"), false);
+    ui.input("\u001bm");
+    await flushPromises();
+    assert.deepEqual(await service.run(details), { kind: "defer" });
+    assert.deepEqual(ui.notifications, [{ type: "error", message: failure === "file"
+      ? "[bash-cmd-checker] Failed to prepare the command file for the external viewer."
+      : "[bash-cmd-checker] Failed to run the external viewer." }]);
+    assert.equal(runtime.state.get(details.requestId)?.decision, undefined);
+    external.fileDependencies.fileSystem.writeFileSync = write;
+    external.processDependencies.spawn = spawn;
+    ui.input("\u001bm");
+    await flushPromises();
+    assert.equal(external.calls.length, 1);
+    assert.equal(ui.customCalls, 0);
+    runtime.dispose();
+    assert.equal(ui.inputHandlers.size, 0);
+  }
+});
+
+test("external startup failures and notification exceptions cannot change an automatic denial or invent a decision", async (t) => {
   const pi = new MockPi();
   const service = new MockService();
   const { ctx, ui } = createContext();
-  const config = { ...DEFAULT_CONFIG, widget: { commandViewerShortcut: "alt+m" as const } };
-  const runtime = attachPermissions(pi.api, ctx, config, () => service.service, unavailableAnalyzer);
+  const external = new MockExternalViewer();
+  const runtime = attachPermissions(pi.api, ctx, { ...DEFAULT_CONFIG, autoBlockUnsafe: true }, () => service.service,
+    () => ({ classification: Promise.resolve<ClassificationResult>({ status: "complete", risk: "unsafe", confidence: 1,
+      probabilities: { "safe-ro": 0, "safe-rw": 0, unsafe: 1 } }), done: Promise.resolve() }), external.dependencies);
   t.after(runtime.dispose);
   const details = commandDetails();
-  assert.deepEqual(await service.run(details), { kind: "defer" });
-  pi.events.emit("permissions:ui_prompt", promptEvent(details));
-  ui.overlayError = new Error("SENSITIVE_VIEWER_ERROR");
-  ui.input("\u001bm");
+  const verdict = await service.run(details);
+  assert.equal(verdict.kind, "deny");
+  external.processDependencies.spawn = () => { throw new Error("SENSITIVE_VIEWER_ERROR"); };
+  ui.ui.notify = () => { throw new Error("SENSITIVE_NOTIFY_ERROR"); };
+  assert.doesNotThrow(() => ui.input("\u001bc"));
   await flushPromises();
-  assert.equal(ui.overlays.length, 0);
-  assert.deepEqual(await service.run(details), { kind: "defer" });
-  assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_VIEWER_ERROR"), false);
-  assert.deepEqual(ui.notifications, [{
-    message: "[bash-cmd-checker] Failed to open the command viewer.", type: "error",
-  }]);
-  ui.overlayError = undefined;
-  ui.input("\u001bm");
-  await flushPromises();
-  assert.equal(ui.overlays.length, 1);
-  assert.ok(ui.overlayText().includes("Alt+m Close"));
-  runtime.dispose();
-  await flushPromises();
-  assert.equal(ui.inputHandlers.size, 0);
-  assert.equal(ui.overlays.length, 0);
+  assert.deepEqual(await service.run(details), verdict);
+  assert.equal(runtime.state.get(details.requestId)?.decision, undefined);
+  assert.ok(ui.components.has(WIDGET_KEY));
 });
 
 test("an input listener failure cannot disable an unsafe authorization verdict or its widget", async (t) => {
@@ -348,7 +380,7 @@ test("an input listener failure cannot disable an unsafe authorization verdict o
   const runtime = attachPermissions(pi.api, ctx, { ...DEFAULT_CONFIG, autoBlockUnsafe: true }, () => service.service,
     () => ({ classification: Promise.resolve<ClassificationResult>({
       status: "complete", risk: "unsafe", confidence: 1, probabilities: { "safe-ro": 0, "safe-rw": 0, unsafe: 1 },
-    }), done: Promise.resolve() }));
+    }), done: Promise.resolve() }), new MockExternalViewer().dependencies);
   t.after(runtime.dispose);
   const result = await service.run(commandDetails());
   assert.equal(result.kind, "deny");
@@ -356,7 +388,7 @@ test("an input listener failure cannot disable an unsafe authorization verdict o
   assert.equal(ui.inputHandlers.size, 0);
   assert.equal(JSON.stringify(ui.notifications).includes("SENSITIVE_INPUT_ERROR"), false);
   assert.deepEqual(ui.notifications.filter((notification) => notification.type === "error"), [{
-    message: "[bash-cmd-checker] Failed to register command viewer input handling.", type: "error",
+    message: "[bash-cmd-checker] Failed to register external viewer input handling.", type: "error",
   }]);
 });
 
@@ -365,7 +397,8 @@ test("widget failures cannot block the gate or escape a background update", asyn
   const service = new MockService();
   const { ctx, ui } = createContext();
   ui.ui.setWidget = () => { throw new Error("SENSITIVE_UI_ERROR"); };
-  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service, unavailableAnalyzer);
+  const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service, unavailableAnalyzer,
+    new MockExternalViewer().dependencies);
   const details = commandDetails();
   assert.deepEqual(await service.run(details), { kind: "defer" });
   assert.doesNotThrow(() => pi.events.emit("permissions:ui_prompt", promptEvent(details)));
@@ -392,70 +425,91 @@ test("malformed events and unsupported authorizer payloads cannot create command
   assert.equal(app.ui.components.size, 0);
 });
 
-test("session end-to-end cleanup is driven by lifecycle shutdown, not agent_end or tree navigation", async () => {
+test("lifecycle shutdown releases checker input but independently triggered startup finishes and retains its file", async (t) => {
   const pi = new MockPi();
   const service = new MockService();
   const { ctx, ui } = createContext();
+  const external = new MockExternalViewer();
+  external.automaticSpawn = false;
   registerLifecycle(pi.api, (api, context, signal) => initializeTui(api, context, signal, {
     loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
     loadAccessor: async () => () => service.service,
     createAnalyzer: () => unavailableAnalyzer,
+    externalViewer: external.dependencies,
     attachPermissions,
   }));
+  t.after(async () => { await pi.emitLifecycle("session_shutdown", ctx, "quit"); external.close(); });
   await pi.emitLifecycle("session_start", ctx);
   const details = commandDetails();
   await service.run(details);
-  pi.events.emit("permissions:ui_prompt", promptEvent(details));
   await pi.emitLifecycle("agent_end", ctx);
   await pi.emitLifecycle("session_tree", ctx);
   assert.ok(ui.components.has(WIDGET_KEY));
   ui.input("\u001bc");
-  await flushPromises();
-  assert.equal(ui.overlays.length, 1);
+  assert.equal(external.calls.length, 1);
+  const path = external.calls[0]!.args.at(-1)!;
+  const oldInput = [...ui.inputHandlers][0]!;
   await pi.emitLifecycle("session_shutdown", ctx, "new");
+  external.children[0]!.emit("spawn");
   await flushPromises();
+  assert.equal(external.children[0]!.unrefs, 1);
+  assert.equal(external.files.get(path), details.payload.evidence[0]!.text);
+  assert.equal(oldInput("\u001bc"), undefined);
   assert.equal(ui.components.size, 0);
-  assert.equal(ui.overlays.length, 0);
   assert.equal(ui.inputHandlers.size, 0);
   assert.equal(pi.events.size, 0);
   assert.equal(service.current, undefined);
+  assert.equal(ui.notifications.length, 0);
 });
 
-test("session replacement and reload independently dispose the viewer and allow one new viewer", async (t) => {
+test("new, resume, fork and reload replace input exactly once without cancelling prior external starts or notifying old UIs", async (t) => {
   const pi = new MockPi();
   const service = new MockService();
-  const { ctx, ui } = createContext();
+  const external = new MockExternalViewer();
+  external.automaticSpawn = false;
   registerLifecycle(pi.api, (api, context, signal) => initializeTui(api, context, signal, {
     loadConfig: async () => ({ status: "loaded", config: DEFAULT_CONFIG }),
     loadAccessor: async () => () => service.service,
     createAnalyzer: () => unavailableAnalyzer,
+    externalViewer: external.dependencies,
     attachPermissions,
   }));
-  t.after(() => pi.emitLifecycle("session_shutdown", ctx, "quit"));
-  let generation = 0;
-  for (const reason of ["startup", "new", "resume", "fork", "reload"]) {
+  const contexts = Array.from({ length: 5 }, (_, index) => createContext(`session-${index}`));
+  t.after(async () => { await pi.emitLifecycle("session_shutdown", contexts.at(-1)!.ctx, "quit"); external.close(); });
+  for (const [generation, reason] of ["startup", "new", "resume", "fork", "reload"].entries()) {
+    const { ctx, ui } = contexts[generation]!;
     await pi.emitLifecycle("session_start", ctx, reason);
-    assert.equal(ui.overlays.length, 0, reason);
     assert.equal(ui.components.size, 0, reason);
     assert.equal(ui.inputHandlers.size, 1, reason);
+    assert.equal(pi.count("session_shutdown"), 1, reason);
+    if (generation > 0) {
+      const previous = contexts[generation - 1]!.ui;
+      assert.equal(previous.inputHandlers.size, 0);
+      assert.equal(previous.components.size, 0);
+      assert.equal(previous.input("\u001bc"), false);
+      // Alternate late success and failure; neither accesses the disposed session's UI.
+      external.children[generation - 1]!.emit(generation % 2 === 0 ? "error" : "spawn", new Error("SENSITIVE_LATE_ERROR"));
+      await flushPromises();
+      assert.equal(previous.notifications.length, 0);
+    }
     const details = commandDetails(`generation-${generation}`, `printf 'generation-${generation}'`);
     await service.run(details);
-    pi.events.emit("permissions:ui_prompt", promptEvent(details));
     ui.input("\u001bc");
-    assert.equal(ui.overlays.length, 1, reason);
-    assert.ok(ui.overlayText().includes(`generation-${generation}`), reason);
-    assert.equal(ui.overlayHistory.length, generation + 1, reason);
-    assert.equal(ui.closeCalls, generation, reason);
-    generation++;
+    assert.equal(external.calls.length, generation + 1, reason);
+    const path = external.calls[generation]!.args.at(-1)!;
+    assert.ok(path.endsWith(`command-session-${generation}.sh`));
+    assert.equal(external.files.get(path), `printf 'generation-${generation}'`);
   }
-  await pi.emitLifecycle("session_shutdown", ctx, "quit");
-  assert.equal(ui.overlays.length, 0);
-  assert.equal(ui.components.size, 0);
-  assert.equal(ui.inputHandlers.size, 0);
-  assert.equal(ui.closeCalls, generation);
+  await pi.emitLifecycle("session_shutdown", contexts.at(-1)!.ctx, "quit");
+  external.children.at(-1)!.emit("spawn");
+  await flushPromises();
+  assert.equal(contexts.at(-1)!.ui.inputHandlers.size, 0);
+  assert.equal(external.files.size, 5);
+  assert.equal(external.children.at(-1)!.unrefs, 1);
+  assert.equal(pi.events.size, 0);
 });
 
-test("cancellation during viewer input registration releases the independent controller before binding", () => {
+test("initialization cancellation during external input registration releases its controller before binding", () => {
   const pi = new MockPi();
   const service = new MockService();
   const { ctx, ui } = createContext();
@@ -467,12 +521,12 @@ test("cancellation during viewer input registration releases the independent con
     return unsubscribe;
   };
   const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service,
-    unavailableAnalyzer, lifetime.signal);
+    unavailableAnalyzer, new MockExternalViewer().dependencies, lifetime.signal);
   assert.equal(runtime.state.active, false);
   assert.equal(ui.inputHandlers.size, 0);
   assert.equal(pi.events.size, 0);
   assert.equal(service.names.length, 0);
-  assert.equal(ui.overlays.length, 0);
+  assert.equal(ui.customCalls, 0);
   runtime.dispose();
 });
 
@@ -484,19 +538,41 @@ test("TUI initialization and permission attachment remain inert in non-TUI modes
       loadConfig: async () => { throw new Error("Must not read config."); },
       loadAccessor: async () => { throw new Error("Must not import the permission package."); },
       createAnalyzer: () => { throw new Error("Must not create an analyzer in a non-TUI session."); },
+      externalViewer: new MockExternalViewer().dependencies,
       attachPermissions: () => { throw new Error("Must not attach in a non-TUI session."); },
     };
     await initializeTui(pi.api, ctx, new AbortController().signal, dependencies);
     const runtime = attachPermissions(
       pi.api, ctx, DEFAULT_CONFIG, () => { throw new Error("Must not bind."); },
-      () => { throw new Error("Must not analyze in a non-TUI session."); },
+      () => { throw new Error("Must not analyze in a non-TUI session."); }, new MockExternalViewer().dependencies,
     );
     assert.equal(runtime.state.active, false, mode);
     assert.equal(pi.events.size, 0, mode);
     assert.equal(ui.notifications.length, 0, mode);
     assert.equal(ui.mounts.length, 0, mode);
     assert.equal(ui.inputHandlers.size, 0, mode);
-    assert.equal(ui.overlayHistory.length, 0, mode);
+    assert.equal(ui.customCalls, 0, mode);
+  }
+});
+
+test("missing serving identities and already cancelled initialization never register viewer input or touch external ports", () => {
+  for (const identity of ["", "   ", "cancelled-session"]) {
+    const pi = new MockPi();
+    const service = new MockService();
+    const { ctx, ui } = createContext(identity);
+    const external = new MockExternalViewer();
+    const lifetime = new AbortController();
+    if (identity === "cancelled-session") lifetime.abort();
+    const runtime = attachPermissions(pi.api, ctx, DEFAULT_CONFIG, () => service.service,
+      unavailableAnalyzer, external.dependencies, lifetime.signal);
+    assert.equal(runtime.state.active, false);
+    assert.equal(ui.inputHandlers.size, 0);
+    assert.equal(pi.events.size, 0);
+    assert.equal(service.current, undefined);
+    assert.equal(external.files.size, 0);
+    assert.equal(external.calls.length, 0);
+    assert.equal(ui.notifications.length, identity === "cancelled-session" ? 0 : 1);
+    runtime.dispose();
   }
 });
 
@@ -512,6 +588,7 @@ test("TUI initialization uses the explicitly supplied analysis dependency", asyn
       calls++;
       publish({ kind: "explanation", value: { status: "complete", text: "Injected explanation" } });
     }),
+    externalViewer: new MockExternalViewer().dependencies,
     attachPermissions,
   });
   const details = commandDetails();
@@ -532,6 +609,7 @@ test("invalid config stays a warning while a missing dependency produces a fixed
         ? { status: "invalid", issues: ["SENSITIVE_CONFIG_ERROR"] } : { status: "loaded", config: DEFAULT_CONFIG },
       loadAccessor: async () => { throw new Error("SENSITIVE_IMPORT_ERROR"); },
       createAnalyzer: () => { throw new Error("Must not create an analyzer after initialization failure."); },
+      externalViewer: new MockExternalViewer().dependencies,
       attachPermissions: () => { throw new Error("Must not attach after initialization failure."); },
     });
     assert.equal(ui.notifications.length, 1);
@@ -557,6 +635,7 @@ test("shutdown across initialization awaits never binds a stale session or calls
         return () => { throw new Error("Must not bind after shutdown."); };
       },
       createAnalyzer: () => { throw new Error("Must not create an analyzer after shutdown."); },
+      externalViewer: new MockExternalViewer().dependencies,
       attachPermissions: () => { throw new Error("Must not attach after shutdown."); },
     });
     await flushPromises();

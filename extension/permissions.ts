@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-system";
 import { extractCommandObservation } from "./command.ts";
-import { createCommandViewerController } from "./command-viewer.ts";
 import { SessionState } from "./state.ts";
 import type {
   AnalysisTask, ClassificationResult, CommandAnalyzer, Config, PermissionRuntime, ServiceAccessor,
@@ -9,7 +8,7 @@ import type {
 } from "./types.ts";
 import { notifyError, notifyWarning } from "./utils-pi.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
-import { createWidgetController } from "./widget.ts";
+import { createWidgetController, type ExternalViewerDependencies } from "./widget.ts";
 
 export const AUTHORIZER_NAME = "bash-cmd-checker";
 
@@ -20,6 +19,7 @@ export function attachPermissions(
   config: Config,
   getService: ServiceAccessor,
   analyzer: CommandAnalyzer,
+  viewerDependencies: ExternalViewerDependencies,
   signal?: AbortSignal,
 ): PermissionRuntime {
   const state: SessionStateContract = new SessionState();
@@ -30,8 +30,9 @@ export function attachPermissions(
     notifyWarning(ctx.ui, "Session identity unavailable; checker disabled.");
     return inert();
   }
-  const viewer = createCommandViewerController(ctx.ui, config.widget.commandViewerShortcut);
-  const widget = createWidgetController(ctx.ui, viewer, config.widget.commandViewerShortcut);
+  const widget = createWidgetController(
+    ctx.ui, sessionId, config.externalViewer, viewerDependencies, config.widget.commandViewerShortcut,
+  );
   const tasks = new Map<string, { controller: AbortController; verdict: Promise<AuthorizerVerdict> }>();
   let boundService: ReturnType<ServiceAccessor>;
   let unregister: (() => void) | undefined;
@@ -62,6 +63,7 @@ export function attachPermissions(
     // The command is displayed as soon as it enters the checker, before classification starts.
     state.show(observation.requestId);
     refresh();
+    if (!state.active) return { kind: "defer" };
     const controller = new AbortController();
     const publish: Parameters<CommandAnalyzer>[2] = (update) => {
       if (controller.signal.aborted || !state.publish(record, update)) return;
@@ -147,8 +149,6 @@ export function attachPermissions(
     for (const { controller } of tasks.values()) controller.abort();
     tasks.clear();
     try { widget.dispose(); } catch {}
-    // Extension shutdown owns viewer cleanup; widget disposal alone never closes the overlay.
-    viewer.dispose();
   };
 
   try {
@@ -157,7 +157,6 @@ export function attachPermissions(
     }));
     subscriptions.push(pi.events.on("permissions:ui_prompt", (raw) => {
       if (!state.active || !isRecord(raw) || !isNonBlankString(raw.requestId)) return;
-      viewer.close();
       state.show(raw.requestId);
       refresh();
     }));

@@ -1,4 +1,4 @@
-import type { KeyId, TUI } from "@earendil-works/pi-tui";
+import type { KeyId } from "@earendil-works/pi-tui";
 import type { AuthorizerVerdict, PermissionsService } from "@gotgenes/pi-permission-system";
 
 export interface ModelReference {
@@ -115,18 +115,6 @@ export interface PermissionRuntime {
 export interface CommandSnapshot {
   readonly requestId: string;
   readonly fullCommand: string;
-}
-
-export interface CommandViewerSource {
-  update(snapshot: CommandSnapshot, owner: TUI): void;
-  clear(): void;
-  dispose(): void;
-}
-
-export interface CommandViewerController {
-  createSource(): CommandViewerSource;
-  close(): void;
-  dispose(): void;
 }
 
 export interface PermissionOutcome {

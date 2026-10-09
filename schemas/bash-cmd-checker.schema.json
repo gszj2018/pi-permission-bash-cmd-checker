@@ -85,7 +85,7 @@
           "type": "string",
           "default": "alt+c",
           "pattern": "^(?!.*\\b(ctrl|alt|shift|super)\\+.*\\b\\1\\+)(?:(?:ctrl|alt|shift|super)\\+){1,4}(?:[a-z0-9\\x60=\\[\\]\\\\;'.,/!@#$%^&*()_|~{}:<>?\\-]|enter|return|tab|space|backspace|delete|insert|home|end|pageUp|pageDown|up|down|left|right)(?![\\s\\S])",
-          "description": "Toggle the read-only full-command overlay. At least one modifier (ctrl, alt, shift or super) is required; unmodified keys are not accepted. Escape/esc, clear and function keys (f1-f12) cannot be configured, even with modifiers; Escape still closes the viewer. Use shift+= rather than + as a base key. Reload Pi to apply changes. Alt+c requires a terminal that reports the combination distinctly."
+          "description": "Open the full command in an external editor when the widget is visible. At least one modifier (ctrl, alt, shift or super) is required; unmodified keys are not accepted. Escape/esc, clear and function keys (f1-f12) cannot be configured, even with modifiers; no viewer close keys are registered. Use shift+= rather than + as a base key. Reload Pi to apply changes. Alt+c requires a terminal that reports the combination distinctly."
         }
       }
     },
