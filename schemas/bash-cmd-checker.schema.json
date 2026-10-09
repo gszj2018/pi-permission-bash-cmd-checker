@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gszj2018/pi-permission-bash-cmd-checker/raw/refs/heads/release/v0.1.0/schemas/bash-cmd-checker.schema.json",
+  "$id": "https://github.com/gszj2018/pi-permission-bash-cmd-checker/raw/refs/heads/release/v0.2.0/schemas/bash-cmd-checker.schema.json",
   "title": "Bash Command Checker Configuration",
   "description": "Reload Pi after changing this file. Invalid configuration disables the checker, not the permission system.",
   "type": "object",
