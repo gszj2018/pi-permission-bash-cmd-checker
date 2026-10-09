@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, lstatSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { ViewerFileDependencies, ViewerProcessDependencies } from "./external-viewer.ts";
+import type { ViewerFileDependencies, ViewerProcessDependencies } from "./types.ts";
 
 /** Only function references are assembled here; importing the module performs no filesystem operations. */
 export const nodeViewerFileDependencies: ViewerFileDependencies = {

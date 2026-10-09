@@ -11,11 +11,12 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extension/config.ts";
 import {
   VIEWER_BASE_DIRECTORY, commandFileName, commandFilePath, launchExternalViewer,
-  prepareCommandFile, type DetachedViewerProcess, type ViewerFileDependencies, type ViewerFileSystem,
-  type ViewerProcessDependencies,
+  prepareCommandFile,
 } from "../extension/external-viewer.ts";
 import { nodeViewerFileDependencies } from "../extension/external-viewer-node.ts";
-import type { ExternalViewerConfig } from "../extension/types.ts";
+import type {
+  DetachedViewerProcess, ExternalViewerConfig, ViewerFileDependencies, ViewerFileSystem, ViewerProcessDependencies,
+} from "../extension/types.ts";
 
 async function isolatedFiles(t: TestContext) {
   // Every real write stays below this unique root, including the injected production-style default directory.

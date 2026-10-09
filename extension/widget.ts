@@ -1,12 +1,10 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type Color, type Component, type KeyId, type TUI } from "@earendil-works/pi-tui";
-import {
-  launchExternalViewer, prepareCommandFile, type ViewerFileDependencies, type ViewerProcessDependencies,
-} from "./external-viewer.ts";
+import { launchExternalViewer, prepareCommandFile } from "./external-viewer.ts";
 import { DEFAULT_COMMAND_VIEWER_SHORTCUT, isShortcutPress, shortcutLabel } from "./shortcut.ts";
 import { PALETTES, renderCommandText, sanitizeTerminalText, wrapTerminalText } from "./terminal-text.ts";
 import type {
-  ClassificationState, CommandRecord, CommandSnapshot, ExternalViewerConfig, RiskLevel,
+  ClassificationState, CommandRecord, CommandSnapshot, ExternalViewerConfig, ExternalViewerDependencies, RiskLevel,
 } from "./types.ts";
 import { notifyError, notifyWarning } from "./utils-pi.ts";
 
@@ -37,11 +35,6 @@ function riskDisplay(classification: ClassificationState): { text: string; color
   const color = classification.risk === "safe-ro" ? "green" : classification.risk === "safe-rw" ? "blue"
     : classification.risk === "unsafe" ? "red" : "yellow";
   return { text: RISK_TEXT[classification.risk], color };
-}
-
-export interface ExternalViewerDependencies {
-  readonly files: ViewerFileDependencies;
-  readonly processes: ViewerProcessDependencies;
 }
 
 type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme" | "custom" | "onTerminalInput" | "notify">;

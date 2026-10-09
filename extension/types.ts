@@ -23,6 +23,52 @@ export interface ExternalViewerConfig {
   readonly filePath: string | null;
 }
 
+/** File metadata needed by the viewer, independent of Node's concrete filesystem types. */
+export interface ViewerFileInfo {
+  isFile(): boolean;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+}
+
+export interface ViewerFileSystem {
+  lstatSync(path: string): ViewerFileInfo;
+  mkdirSync(path: string, options: { recursive: true; mode: number }): void;
+  openSync(path: string, flags: number, mode: number): number;
+  writeFileSync(fd: number, text: string, encoding: "utf8"): void;
+  closeSync(fd: number): void;
+}
+
+export interface ViewerFileDependencies {
+  readonly fileSystem: ViewerFileSystem;
+  temporaryDirectory(): string;
+}
+
+export interface DetachedViewerProcess {
+  on(event: "error", handler: (error: Error) => void): unknown;
+  once(event: "spawn" | "close", handler: () => void): unknown;
+  removeListener(event: "error", handler: (error: Error) => void): unknown;
+  removeListener(event: "spawn", handler: () => void): unknown;
+  unref(): void;
+}
+
+export interface ViewerProcessDependencies {
+  spawn(command: string, args: readonly string[], options: {
+    shell: false; detached: true; stdio: "ignore";
+  }): DetachedViewerProcess;
+  spawnSync(command: string, args: readonly string[], options: {
+    shell: false; stdio: "inherit";
+  }): { status: number | null; signal: string | null; error?: Error };
+  writeTerminal(text: string): void;
+}
+
+/** Shared operation ports; neither widgets nor Node adapters are part of this contract. */
+export interface ExternalViewerDependencies {
+  readonly files: ViewerFileDependencies;
+  readonly processes: ViewerProcessDependencies;
+}
+
+export type ViewerLaunchResult = "started" | "completed" | "failed" | "terminal-failed" | "unconfigured";
+
 export interface Config {
   /** Null selects the current session model at request time. */
   readonly llm: {

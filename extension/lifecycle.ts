@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { attachPermissions } from "./permissions.ts";
-import type { CommandAnalyzer, Config, ConfigLoadResult, ServiceAccessor } from "./types.ts";
+import type {
+  CommandAnalyzer, Config, ConfigLoadResult, ExternalViewerDependencies, PermissionRuntime, ServiceAccessor,
+} from "./types.ts";
 import { notifyError, notifyWarning } from "./utils-pi.ts";
-import type { ExternalViewerDependencies } from "./widget.ts";
 
 export type TuiInitializer = (
   pi: ExtensionAPI,
@@ -10,12 +10,23 @@ export type TuiInitializer = (
   signal: AbortSignal,
 ) => Promise<() => void>;
 
+/** Synchronous permission attachment contract consumed by TUI initialization. */
+export type PermissionAttacher = (
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  config: Config,
+  getService: ServiceAccessor,
+  analyzer: CommandAnalyzer,
+  viewerDependencies: ExternalViewerDependencies,
+  signal?: AbortSignal,
+) => PermissionRuntime;
+
 export interface TuiDependencies {
   loadConfig(): Promise<ConfigLoadResult>;
   loadAccessor(): Promise<ServiceAccessor>;
   createAnalyzer(ctx: ExtensionContext, config: Config): CommandAnalyzer;
   readonly externalViewer: ExternalViewerDependencies;
-  attachPermissions: typeof attachPermissions;
+  attachPermissions: PermissionAttacher;
 }
 
 /** Factory-time registration is limited to mode detection; non-TUI sessions never initialize checker features. */

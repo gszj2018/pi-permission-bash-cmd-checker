@@ -3,12 +3,12 @@ import type { Authorizer, AuthorizerVerdict } from "@gotgenes/pi-permission-syst
 import { extractCommandObservation } from "./command.ts";
 import { SessionState } from "./state.ts";
 import type {
-  AnalysisTask, ClassificationResult, CommandAnalyzer, Config, PermissionRuntime, ServiceAccessor,
-  SessionStateContract,
+  AnalysisTask, ClassificationResult, CommandAnalyzer, Config, ExternalViewerDependencies, PermissionRuntime,
+  ServiceAccessor, SessionStateContract,
 } from "./types.ts";
 import { notifyError, notifyWarning } from "./utils-pi.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
-import { createWidgetController, type ExternalViewerDependencies } from "./widget.ts";
+import { createWidgetController } from "./widget.ts";
 
 export const AUTHORIZER_NAME = "bash-cmd-checker";
 

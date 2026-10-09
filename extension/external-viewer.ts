@@ -2,31 +2,15 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { ExternalViewerConfig } from "./types.ts";
+import type {
+  DetachedViewerProcess, ExternalViewerConfig, ViewerFileDependencies, ViewerFileInfo, ViewerFileSystem,
+  ViewerLaunchResult, ViewerProcessDependencies,
+} from "./types.ts";
 import { isNonBlankString, isRecord } from "./utils.ts";
 
 export const VIEWER_BASE_DIRECTORY = "pi-permission-bash-cmd-checker";
 // Direct create/truncate, with final symlink protection where the platform supports O_NOFOLLOW.
 const COMMAND_FILE_WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
-
-interface FileInfo {
-  isFile(): boolean;
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-}
-
-export interface ViewerFileSystem {
-  lstatSync(path: string): FileInfo;
-  mkdirSync(path: string, options: { recursive: true; mode: number }): void;
-  openSync(path: string, flags: number, mode: number): number;
-  writeFileSync(fd: number, text: string, encoding: "utf8"): void;
-  closeSync(fd: number): void;
-}
-
-export interface ViewerFileDependencies {
-  readonly fileSystem: ViewerFileSystem;
-  temporaryDirectory(): string;
-}
 
 export function commandFileName(sessionId: string): string {
   if (!isNonBlankString(sessionId)) throw new Error("Session identity unavailable.");
@@ -44,18 +28,18 @@ export function commandFilePath(sessionId: string, directory: string | null, tem
   return join(resolve(selectedDirectory), commandFileName(sessionId));
 }
 
-function existingInfo(fileSystem: ViewerFileSystem, path: string): FileInfo | undefined {
+function existingInfo(fileSystem: ViewerFileSystem, path: string): ViewerFileInfo | undefined {
   try { return fileSystem.lstatSync(path); } catch (error) {
     if (isRecord(error) && error.code === "ENOENT") return;
     throw error;
   }
 }
 
-function checkDirectory(info: FileInfo | undefined): void {
+function checkDirectory(info: ViewerFileInfo | undefined): void {
   if (info && (info.isSymbolicLink() || !info.isDirectory())) throw new Error("Unsafe command directory.");
 }
 
-function checkTarget(info: FileInfo | undefined): void {
+function checkTarget(info: ViewerFileInfo | undefined): void {
   if (info && (info.isSymbolicLink() || !info.isFile())) throw new Error("Unsafe command file.");
 }
 
@@ -85,26 +69,6 @@ export function prepareCommandFile(
     if (fd !== undefined) { try { fileSystem.closeSync(fd); } catch {} }
   }
 }
-
-export interface DetachedViewerProcess {
-  on(event: "error", handler: (error: Error) => void): unknown;
-  once(event: "spawn" | "close", handler: () => void): unknown;
-  removeListener(event: "error", handler: (error: Error) => void): unknown;
-  removeListener(event: "spawn", handler: () => void): unknown;
-  unref(): void;
-}
-
-export interface ViewerProcessDependencies {
-  spawn(command: string, args: readonly string[], options: {
-    shell: false; detached: true; stdio: "ignore";
-  }): DetachedViewerProcess;
-  spawnSync(command: string, args: readonly string[], options: {
-    shell: false; stdio: "inherit";
-  }): { status: number | null; signal: string | null; error?: Error };
-  writeTerminal(text: string): void;
-}
-
-export type ViewerLaunchResult = "started" | "completed" | "failed" | "terminal-failed" | "unconfigured";
 
 type ViewerUi = Pick<ExtensionUIContext, "custom">;
 

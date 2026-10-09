@@ -1,9 +1,8 @@
 import { EventEmitter } from "node:events";
 import { dirname, resolve } from "node:path";
 import type {
-  DetachedViewerProcess, ViewerFileDependencies, ViewerProcessDependencies,
-} from "../../extension/external-viewer.ts";
-import type { ExternalViewerDependencies } from "../../extension/widget.ts";
+  DetachedViewerProcess, ExternalViewerDependencies, ViewerFileDependencies, ViewerProcessDependencies,
+} from "../../extension/types.ts";
 
 export class MockViewerProcess extends EventEmitter implements DetachedViewerProcess {
   unrefs = 0;
