@@ -113,8 +113,7 @@ export function createWidgetController(
   dependencies: ExternalViewerDependencies,
   shortcut: KeyId = DEFAULT_COMMAND_VIEWER_SHORTCUT,
 ): WidgetController {
-  let component: CommandWidget | undefined;
-  let tui: TUI | undefined;
+  let mounted: { component: CommandWidget; tui: TUI } | undefined;
   let disposed = false;
   let busy = false;
   let unsubscribe: (() => void) | undefined;
@@ -144,36 +143,34 @@ export function createWidgetController(
 
   try {
     unsubscribe = ui.onTerminalInput((data) => {
-      if (disposed || !component || !matchesKey(data, shortcut)) return;
-      if (!busy && isShortcutPress(data, shortcut)) void open(component.snapshot());
+      if (disposed || !mounted || !matchesKey(data, shortcut)) return;
+      if (!busy && isShortcutPress(data, shortcut)) void open(mounted.component.snapshot());
       return { consume: true };
     });
   } catch { notifyError(ui, "Failed to register external viewer input handling."); }
 
   const hide = (): void => {
-    if (!component) return;
-    component = undefined;
-    tui = undefined;
+    if (!mounted) return;
+    mounted = undefined;
     ui.setWidget(WIDGET_KEY, undefined);
   };
   return {
     show(record) {
       if (disposed) return;
       try {
-        if (component && tui) {
-          component.setRecord(record);
-          tui.requestRender();
+        if (mounted) {
+          mounted.component.setRecord(record);
+          mounted.tui.requestRender();
           return;
         }
         ui.setWidget(WIDGET_KEY, (owner) => {
           if (disposed) return { render: () => [], invalidate() {} };
-          component = new CommandWidget(record, () => ui.theme, shortcut);
-          tui = owner;
+          const component = new CommandWidget(record, () => ui.theme, shortcut);
+          mounted = { component, tui: owner };
           return component;
         }, { placement: "aboveEditor" });
       } catch (error) {
-        component = undefined;
-        tui = undefined;
+        mounted = undefined;
         throw error;
       }
     },
@@ -183,7 +180,7 @@ export function createWidgetController(
       disposed = true;
       try { unsubscribe?.(); } catch {}
       unsubscribe = undefined;
-      hide();
+      try { hide(); } catch {}
     },
   };
 }

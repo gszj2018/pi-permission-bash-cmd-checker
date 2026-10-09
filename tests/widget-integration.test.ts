@@ -330,6 +330,56 @@ test("controller disposal releases input once and suppresses late notifications 
   }
 });
 
+test("hide propagates host removal errors after clearing the mounted state and allows a fresh mount", async (t) => {
+  const app = setup(t);
+  app.controller.show(record());
+  const previous = app.ui.components.get(WIDGET_KEY);
+  const setWidget = app.ui.ui.setWidget;
+  const removalError = new Error("MOCK_WIDGET_REMOVAL_ERROR");
+  let removalCalls = 0;
+  app.ui.ui.setWidget = () => { removalCalls++; throw removalError; };
+  assert.throws(() => app.controller.hide(), (error: unknown) => error === removalError);
+  assert.equal(app.ui.input(shortcut), false);
+  assert.equal(app.ui.inputHandlers.size, 1);
+  assert.equal(app.external.calls.length, 0);
+  assert.doesNotThrow(() => app.controller.hide());
+  assert.equal(removalCalls, 1);
+  app.ui.ui.setWidget = setWidget;
+  app.controller.show(record("recovered", "recovered command"));
+  assert.notEqual(app.ui.components.get(WIDGET_KEY), previous);
+  assert.equal(app.ui.input(shortcut), true);
+  await flushPromises();
+  assert.equal(app.external.files.get(app.path), "recovered command");
+});
+
+test("disposal contains host removal errors, releases input once and suppresses late startup notifications", async (t) => {
+  const app = setup(t);
+  app.external.automaticSpawn = false;
+  app.controller.show(record());
+  const previous = app.ui.components.get(WIDGET_KEY);
+  const handler = [...app.ui.inputHandlers][0]!;
+  app.ui.input(shortcut);
+  const removalStates: unknown[] = [];
+  app.ui.ui.setWidget = () => {
+    removalStates.push({ listeners: app.ui.inputHandlers.size, input: handler(shortcut) });
+    throw new Error("SENSITIVE_WIDGET_REMOVAL_ERROR");
+  };
+  assert.doesNotThrow(() => app.controller.dispose());
+  assert.doesNotThrow(() => app.controller.dispose());
+  app.controller.show(record("stale", "stale command"));
+  assert.deepEqual(removalStates, [{ listeners: 0, input: undefined }]);
+  assert.equal(app.ui.inputHandlers.size, 0);
+  assert.equal(app.ui.input(shortcut), false);
+  assert.equal(handler(shortcut), undefined);
+  // A failed host removal can leave a stale rendered widget, but never an active controller.
+  assert.equal(app.ui.components.get(WIDGET_KEY), previous);
+  app.external.children[0]!.emit("error", new Error("SENSITIVE_LATE_ERROR"));
+  await flushPromises();
+  assert.equal(app.external.calls.length, 1);
+  assert.equal(app.external.files.get(app.path), "printf 'first full command'");
+  assert.deepEqual(app.ui.notifications, []);
+});
+
 test("input registration errors do not escape and reentrant or throwing cleanup remains idempotent", (t) => {
   const ui = new MockUi();
   const external = new MockExternalViewer();
