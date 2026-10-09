@@ -6,8 +6,6 @@ import { link, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
-import type { ExtensionUIContext, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "../extension/config.ts";
 import {
   VIEWER_BASE_DIRECTORY, commandFileName, commandFilePath, launchExternalViewer,
@@ -239,9 +237,22 @@ function mockProcesses() {
   return { child, calls, steps, dependencies };
 }
 
-const noCustom: Pick<ExtensionUIContext, "custom"> = {
-  custom: () => { assert.fail("Detach and unconfigured operations must not touch the terminal UI."); },
-};
+type ViewerTerminal = Parameters<typeof launchExternalViewer>[0];
+
+function mockTerminal(steps: string[], failure?: "stop" | "start" | "render" | "start-and-render"): ViewerTerminal {
+  return {
+    stop() { steps.push("stop"); if (failure === "stop") throw new Error("MOCK_STOP_ERROR"); },
+    start() {
+      steps.push("start");
+      if (failure === "start" || failure === "start-and-render") throw new Error("MOCK_START_ERROR");
+    },
+    requestRender(force?: boolean) {
+      steps.push(force === true ? "render" : "unforced-render");
+      if (failure === "render" || failure === "start-and-render") throw new Error("MOCK_RENDER_ERROR");
+    },
+  };
+}
+
 const commandPath = resolve("mock command directory", "command-session.sh");
 
 function viewerConfig(overrides: Partial<ExternalViewerConfig> = {}): ExternalViewerConfig {
@@ -252,7 +263,7 @@ test("detach passes a literal args array and the final absolute file path withou
   const app = mockProcesses();
   const args = Object.freeze(["", "--reuse-window", "space and 'quotes'", "$(literal); &"]);
   const config = viewerConfig({ command: "C:\\Program Files\\Code.exe", args });
-  const pending = launchExternalViewer(noCustom, config, commandPath, app.dependencies);
+  const pending = launchExternalViewer(mockTerminal(app.steps), config, commandPath, app.dependencies);
   let finished = false;
   void pending.then(() => { finished = true; });
   await Promise.resolve();
@@ -275,65 +286,31 @@ test("detach contains synchronous spawn failures, asynchronous errors and unref 
     const app = mockProcesses();
     if (failure === "throw") app.dependencies.spawn = () => { throw new Error("MOCK_SPAWN_ERROR"); };
     if (failure === "unref") app.child.unrefError = true;
-    const pending = launchExternalViewer(noCustom, viewerConfig(), commandPath, app.dependencies);
+    const pending = launchExternalViewer(mockTerminal(app.steps), viewerConfig(), commandPath, app.dependencies);
     if (failure === "error") app.child.emit("error", new Error("MOCK_ASYNC_ERROR"));
     if (failure === "unref") app.child.emit("spawn");
     if (failure === "early-close") app.child.emit("close");
     assert.equal(await pending, "failed");
     if (failure !== "throw" && failure !== "early-close") app.child.emit("close");
     assert.equal(app.child.listenerCount("error"), 0);
+    assert.deepEqual(app.steps, []);
   }
 });
 
-type WaitFactory<T> = (
-  tui: TUI, theme: Theme, keys: KeybindingsManager, done: (value: T) => void,
-) => Component | Promise<Component>;
-
-function waitUi(steps: string[], failure?: "stop" | "start" | "render" | "custom") {
-  let mounts = 0;
-  const tui = {
-    stop() { steps.push("stop"); if (failure === "stop") throw new Error("MOCK_STOP_ERROR"); },
-    start() { steps.push("start"); if (failure === "start") throw new Error("MOCK_START_ERROR"); },
-    requestRender(force?: boolean) {
-      assert.equal(force, true); steps.push("render");
-      if (failure === "render") throw new Error("MOCK_RENDER_ERROR");
-    },
-  } as unknown as TUI;
-  const ui: Pick<ExtensionUIContext, "custom"> = {
-    async custom<T>(factory: WaitFactory<T>) {
-      steps.push("custom");
-      if (failure === "custom") throw new Error("MOCK_CUSTOM_ERROR");
-      let completed = false;
-      let result!: T;
-      const component = factory(tui, {} as Theme, {} as KeybindingsManager, (value) => {
-        steps.push("done"); completed = true; result = value;
-      });
-      assert.equal(component instanceof Promise, false, "The handoff factory must finish synchronously.");
-      if (!completed) mounts++;
-      assert.equal(completed, true);
-      assert.deepEqual((component as Component).render(80), []);
-      return result;
-    },
-  };
-  return { ui, mounts: () => mounts };
-}
-
-test("wait synchronously hands off and restores the terminal without mounting a command preview", async () => {
+test("wait synchronously hands off and restores the supplied terminal", async () => {
   const app = mockProcesses();
-  const ui = waitUi(app.steps);
   const config = viewerConfig({ command: "nvim", args: ["-R", "$(literal); &"], mode: "wait" });
-  assert.equal(await launchExternalViewer(ui.ui, config, commandPath, app.dependencies), "completed");
-  assert.deepEqual(app.steps, ["custom", "stop", "clear", "spawnSync", "start", "render", "done"]);
+  const pending = launchExternalViewer(mockTerminal(app.steps), config, commandPath, app.dependencies);
+  assert.deepEqual(app.steps, ["stop", "clear", "spawnSync", "start", "render"]);
+  assert.equal(await pending, "completed");
   assert.deepEqual(app.calls, [{ command: "nvim", args: ["-R", "$(literal); &", commandPath],
     options: { shell: false, stdio: "inherit" } }]);
-  assert.equal(ui.mounts(), 0);
   assert.equal(app.child.unrefs, 0);
 });
 
 test("wait restores the terminal after nonzero, signal, error and thrown process failures", async () => {
   for (const failure of ["nonzero", "signal", "error", "throw"] as const) {
     const app = mockProcesses();
-    const ui = waitUi(app.steps);
     app.dependencies.spawnSync = () => {
       app.steps.push("spawnSync");
       if (failure === "throw") throw new Error("MOCK_SYNC_ERROR");
@@ -341,32 +318,39 @@ test("wait restores the terminal after nonzero, signal, error and thrown process
         signal: failure === "signal" ? "SIGINT" : null,
         ...(failure === "error" ? { error: new Error("MOCK_SYNC_ERROR") } : {}) };
     };
-    assert.equal(await launchExternalViewer(ui.ui, viewerConfig({ mode: "wait" }), commandPath, app.dependencies), "failed");
-    assert.deepEqual(app.steps.slice(-3), ["start", "render", "done"]);
-    assert.equal(ui.mounts(), 0);
+    assert.equal(await launchExternalViewer(mockTerminal(app.steps), viewerConfig({ mode: "wait" }), commandPath,
+      app.dependencies), "failed");
+    assert.deepEqual(app.steps, ["stop", "clear", "spawnSync", "start", "render"]);
   }
 });
 
-test("terminal handoff failures still attempt restoration and complete the custom interaction", async () => {
-  for (const failure of ["stop", "clear", "start", "render", "custom"] as const) {
+test("terminal handoff failures still attempt both restoration steps independently", async () => {
+  for (const failure of ["stop", "clear", "start", "render", "start-and-render"] as const) {
     const app = mockProcesses();
-    const ui = waitUi(app.steps, failure === "clear" ? undefined : failure);
-    if (failure === "clear") app.dependencies.writeTerminal = () => { throw new Error("MOCK_WRITE_ERROR"); };
-    assert.equal(await launchExternalViewer(ui.ui, viewerConfig({ mode: "wait" }), commandPath, app.dependencies),
+    const tui = mockTerminal(app.steps, failure === "clear" ? undefined : failure);
+    if (failure === "clear") app.dependencies.writeTerminal = () => {
+      app.steps.push("clear");
+      throw new Error("MOCK_WRITE_ERROR");
+    };
+    assert.equal(await launchExternalViewer(tui, viewerConfig({ mode: "wait" }), commandPath, app.dependencies),
       "terminal-failed");
-    if (failure !== "custom") assert.deepEqual(app.steps.slice(-3), ["start", "render", "done"]);
-    if (failure === "stop" || failure === "clear" || failure === "custom") assert.equal(app.calls.length, 0);
-    assert.equal(ui.mounts(), 0);
+    const expected = failure === "stop" ? ["stop"] : failure === "clear" ? ["stop", "clear"]
+      : ["stop", "clear", "spawnSync"];
+    assert.deepEqual(app.steps, [...expected, "start", "render"]);
+    assert.equal(app.calls.length, failure === "stop" || failure === "clear" ? 0 : 1);
   }
 });
 
-test("unconfigured and invalid-path launches never start a process", async () => {
+test("unconfigured and invalid-path launches never start a process or touch the terminal", async () => {
   const app = mockProcesses();
-  assert.equal(await launchExternalViewer(noCustom, viewerConfig({ command: null }), commandPath, app.dependencies),
-    "unconfigured");
-  for (const path of ["relative.sh", `${commandPath}\u0000`]) {
-    assert.equal(await launchExternalViewer(noCustom, viewerConfig(), path, app.dependencies), "failed");
+  const tui = mockTerminal(app.steps);
+  assert.equal(await launchExternalViewer(tui, viewerConfig({ command: null, mode: "wait" }), commandPath,
+    app.dependencies), "unconfigured");
+  for (const mode of ["detach", "wait"] as const) {
+    for (const path of ["relative.sh", `${commandPath}\u0000`]) {
+      assert.equal(await launchExternalViewer(tui, viewerConfig({ mode }), path, app.dependencies), "failed");
+    }
   }
-  assert.equal(app.steps.length, 0);
+  assert.deepEqual(app.steps, []);
   assert.equal(app.calls.length, 0);
 });

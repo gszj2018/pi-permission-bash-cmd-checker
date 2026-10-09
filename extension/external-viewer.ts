@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
 import type {
   DetachedViewerProcess, ExternalViewerConfig, ViewerFileDependencies, ViewerFileInfo, ViewerFileSystem,
   ViewerLaunchResult, ViewerProcessDependencies,
@@ -70,7 +70,7 @@ export function prepareCommandFile(
   }
 }
 
-type ViewerUi = Pick<ExtensionUIContext, "custom">;
+type ViewerTerminal = Pick<TUI, "stop" | "start" | "requestRender">;
 
 function launchDetached(
   command: string,
@@ -98,37 +98,31 @@ function launchDetached(
   });
 }
 
-async function launchWait(
-  ui: ViewerUi,
+function launchWait(
+  tui: ViewerTerminal,
   command: string,
   args: readonly string[],
   dependencies: ViewerProcessDependencies,
-): Promise<ViewerLaunchResult> {
+): ViewerLaunchResult {
+  let result: ViewerLaunchResult = "failed";
   try {
-    return await ui.custom<ViewerLaunchResult>((tui, _theme, _keys, done) => {
-      let result: ViewerLaunchResult = "failed";
-      try {
-        tui.stop();
-        dependencies.writeTerminal("\u001b[2J\u001b[H");
-        try {
-          const exit = dependencies.spawnSync(command, args, { shell: false, stdio: "inherit" });
-          result = !exit.error && exit.status === 0 && exit.signal === null ? "completed" : "failed";
-        } catch { result = "failed"; }
-      } catch { result = "terminal-failed"; } finally {
-        // Attempt both restoration steps independently; a start failure must not skip the render or completion.
-        try { tui.start(); } catch { result = "terminal-failed"; }
-        try { tui.requestRender(true); } catch { result = "terminal-failed"; }
-        done(result);
-      }
-      // Synchronous done prevents mounting this empty component or replacing any permission overlay.
-      return { render: () => [], invalidate() {} };
-    });
-  } catch { return "terminal-failed"; }
+    tui.stop();
+    dependencies.writeTerminal("\u001b[2J\u001b[H");
+    try {
+      const exit = dependencies.spawnSync(command, args, { shell: false, stdio: "inherit" });
+      result = !exit.error && exit.status === 0 && exit.signal === null ? "completed" : "failed";
+    } catch { result = "failed"; }
+  } catch { result = "terminal-failed"; } finally {
+    // Attempt both restoration steps independently; a start failure must not skip rendering.
+    try { tui.start(); } catch { result = "terminal-failed"; }
+    try { tui.requestRender(true); } catch { result = "terminal-failed"; }
+  }
+  return result;
 }
 
 /** Launch only the configured executable. File contents are never interpreted by this module as a command. */
 export async function launchExternalViewer(
-  ui: ViewerUi,
+  tui: ViewerTerminal,
   config: ExternalViewerConfig,
   absoluteCommandFile: string,
   dependencies: ViewerProcessDependencies,
@@ -138,5 +132,5 @@ export async function launchExternalViewer(
   const args = [...config.args, absoluteCommandFile];
   return config.mode === "detach"
     ? launchDetached(config.command, args, dependencies)
-    : launchWait(ui, config.command, args, dependencies);
+    : launchWait(tui, config.command, args, dependencies);
 }

@@ -37,7 +37,7 @@ function riskDisplay(classification: ClassificationState): { text: string; color
   return { text: RISK_TEXT[classification.risk], color };
 }
 
-type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme" | "custom" | "onTerminalInput" | "notify">;
+type WidgetUi = Pick<ExtensionUIContext, "setWidget" | "theme" | "onTerminalInput" | "notify">;
 
 /** Non-interactive component: never owns focus or handles terminal input. */
 export class CommandWidget implements Component {
@@ -111,7 +111,7 @@ export function createWidgetController(
   let busy = false;
   let unsubscribe: (() => void) | undefined;
 
-  const open = async (snapshot: CommandSnapshot): Promise<void> => {
+  const open = async (snapshot: CommandSnapshot, tui: TUI): Promise<void> => {
     busy = true;
     try {
       if (viewerConfig.command === null) {
@@ -123,7 +123,7 @@ export function createWidgetController(
         if (!disposed) notifyError(ui, "Failed to prepare the command file for the external viewer.");
         return;
       }
-      const result = await launchExternalViewer(ui, viewerConfig, path, dependencies.processes);
+      const result = await launchExternalViewer(tui, viewerConfig, path, dependencies.processes);
       if (disposed) return;
       if (result === "failed") notifyError(ui, "Failed to run the external viewer.");
       else if (result === "terminal-failed") {
@@ -137,7 +137,7 @@ export function createWidgetController(
   try {
     unsubscribe = ui.onTerminalInput((data) => {
       if (disposed || !mounted || !matchesKey(data, shortcut)) return;
-      if (!busy && isShortcutPress(data, shortcut)) void open(mounted.component.snapshot());
+      if (!busy && isShortcutPress(data, shortcut)) void open(mounted.component.snapshot(), mounted.tui);
       return { consume: true };
     });
   } catch { notifyError(ui, "Failed to register external viewer input handling."); }

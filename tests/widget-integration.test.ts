@@ -234,17 +234,58 @@ test("detached startup errors notify safely and release busy for retry", async (
   }
 });
 
-test("wait gets the current custom TUI rather than the widget owner captured before a terminal mode change", async (t) => {
+test("wait uses the mounted widget's TUI and follows a later remount", async (t) => {
   const app = setup(t, { mode: "wait" });
   app.controller.show(record());
-  const current = new MockUi();
-  app.ui.ui.custom = current.ui.custom;
+  app.ui.input(shortcut);
+  assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
+  await flushPromises();
+  assert.equal(app.external.calls[0]!.mode, "wait");
+  app.controller.hide();
+  const next = new MockUi();
+  app.ui.ui.setWidget = next.ui.setWidget;
+  app.controller.show(record("next", "next command"));
   app.ui.input(shortcut);
   await flushPromises();
-  assert.deepEqual(app.ui.terminalSteps, []);
-  assert.deepEqual(current.terminalSteps, ["stop", "start", "render"]);
-  assert.equal(current.customMounts, 0);
-  assert.equal(app.external.calls[0]!.mode, "wait");
+  assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
+  assert.deepEqual(next.terminalSteps, ["stop", "start", "render"]);
+  assert.equal(app.ui.customCalls, 0);
+  assert.equal(next.customCalls, 0);
+  assert.equal(app.external.files.get(app.path), "next command");
+});
+
+test("wait captures its command and TUI before file preparation can hide, remount or dispose the controller", async (t) => {
+  for (const change of ["hide", "remount", "dispose"] as const) {
+    const app = setup(t, { mode: "wait" });
+    const next = new MockUi();
+    app.controller.show(record());
+    const write = app.external.fileDependencies.fileSystem.writeFileSync;
+    app.external.fileDependencies.fileSystem.writeFileSync = (...args) => {
+      write(...args);
+      if (change === "dispose") app.controller.dispose();
+      else {
+        app.controller.hide();
+        if (change === "remount") {
+          app.ui.ui.setWidget = next.ui.setWidget;
+          app.controller.show(record("replacement", "replacement command"));
+        }
+      }
+    };
+    const spawn = app.external.processDependencies.spawnSync;
+    app.external.processDependencies.spawnSync = (...args) => { spawn(...args); return { status: 7, signal: null }; };
+    app.ui.input(shortcut);
+    await flushPromises();
+    assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
+    assert.deepEqual(next.terminalSteps, []);
+    assert.equal(app.ui.customCalls, 0);
+    assert.equal(next.customCalls, 0);
+    assert.equal(app.external.calls.length, 1);
+    assert.equal(app.external.files.get(app.path), "printf 'first full command'");
+    assert.equal(app.ui.inputHandlers.size, change === "dispose" ? 0 : 1);
+    assert.deepEqual(app.ui.notifications, change === "dispose" ? [] : [{
+      message: "[bash-cmd-checker] Failed to run the external viewer.", type: "error",
+    }]);
+  }
 });
 
 test("wait keeps busy during handoff, restores before notifying and permits a later retry", async (t) => {
@@ -264,33 +305,12 @@ test("wait keeps busy during handoff, restores before notifying and permits a la
   assert.equal(app.external.calls.length, 1);
   assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
   assert.equal(app.ui.customMounts, 0);
+  assert.equal(app.ui.customCalls, 0);
   assert.deepEqual(app.ui.notifications, [{ message: "[bash-cmd-checker] Failed to run the external viewer.", type: "error" }]);
   app.external.processDependencies.spawnSync = spawn;
   app.ui.input(shortcut);
   await flushPromises();
   assert.equal(app.external.calls.length, 2);
-});
-
-test("wait completes synchronously without mounting a viewer or dismissing a permission overlay", async (t) => {
-  const app = setup(t, { command: "nvim", args: ["-R"], mode: "wait" });
-  let closePermission!: () => void;
-  const permission = app.ui.ui.custom<void>((_tui, _theme, _keys, done) => {
-    closePermission = () => { done(undefined); };
-    return { render: () => ["Permission dialog"], invalidate() {} };
-  }, { overlay: true });
-  t.after(async () => { closePermission(); await permission; });
-  await flushPromises();
-  const dialog = app.ui.overlays[0]!;
-  app.controller.show(record());
-  app.ui.input(shortcut);
-  await flushPromises();
-  assert.equal(app.external.calls.length, 1);
-  assert.deepEqual(app.ui.overlays, [dialog]);
-  assert.equal(dialog.closed, false);
-  assert.equal(app.ui.customMounts, 1);
-  assert.deepEqual(app.ui.terminalSteps, ["stop", "start", "render"]);
-  app.controller.dispose();
-  assert.equal(dialog.closed, false);
 });
 
 test("terminal recovery errors have a fixed notification and notification failures cannot escape", async (t) => {
