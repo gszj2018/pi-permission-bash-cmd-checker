@@ -35,7 +35,7 @@
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*",
-    "@gotgenes/pi-permission-system": ">=39.0.3"
+    "@gotgenes/pi-permission-system": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

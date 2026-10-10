@@ -37,7 +37,7 @@ Press **Alt+C** to view the complete command in the configured external viewer.
 Requirements:
 
 - A Pi version with **Classifier/Jev support**.
-- **`@gotgenes/pi-permission-system` 39.0.3 or later**.
+- [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 
 This extension works only in the interactive TUI.
 

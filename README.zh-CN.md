@@ -35,7 +35,7 @@
 前置要求：
 
 - 支持 **Classifier/Jev** 的 Pi 版本。
-- **`@gotgenes/pi-permission-system` 39.0.3 或更高版本**。
+- [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 
 本扩展仅在交互式 TUI 中运行。
 
