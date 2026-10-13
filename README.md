@@ -6,6 +6,8 @@ A [Pi Coding Agent](https://github.com/earendil-works/pi) extension package that
 [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 with **bash command explanations and classifier-based risk assessment** in the terminal UI.
 
+Inspired by GitHub Copilot in Visual Studio Code.
+
 ![Bash command preview shown above the permission prompt](./media/screenshot_en.png)
 
 ## Features
@@ -73,8 +75,8 @@ If you use project-level permission settings, make sure the chain in effect also
 
 ### Opening the Full Command
 
-| Key                                    | Action                                                      |
-|----------------------------------------|-------------------------------------------------------------|
+| Key                                    | Action                                                       |
+|----------------------------------------|--------------------------------------------------------------|
 | **Alt+C**, or your configured shortcut | Open the complete command in the configured external viewer. |
 
 ## Configuration
@@ -122,7 +124,7 @@ JSON Schema. An optional `$schema` field enables schema validation in your edito
 | `classifier.thresholds.safe`       | `0.5`                 | Minimum probability required for a safe category.                                                                          |
 | `classifier.thresholds.unsafe`     | `0.3`                 | Minimum probability required for the unsafe category.                                                                      |
 | `classifier.thresholds.confidence` | `0.8`                 | Minimum confidence required to accept an assessment.                                                                       |
-| `widget.commandViewerShortcut`     | `"alt+c"`             | Shortcut for opening the complete command in the external viewer.                                                                              |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | Shortcut for opening the complete command in the external viewer.                                                          |
 | `externalViewer.command`           | `"code"`              | Viewer executable name or path.<br>`null` leaves the viewer unconfigured.                                                  |
 | `externalViewer.args`              | `[]`                  | Literal arguments passed to the viewer before the command file path.                                                       |
 | `externalViewer.mode`              | `"detach"`            | `detach` starts the viewer in the background; `wait` suspends the TUI until the viewer exits.                              |

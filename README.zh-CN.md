@@ -6,6 +6,8 @@
 [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 的**功能增强插件**，在终端 UI 中提供 **bash 命令解释与基于分类模型的风险评估**。
 
+该扩展是受 VSCode 中的 Copilot 的相关功能的启发而制作的。
+
 ![权限提示上方显示的命令预览](./media/screenshot_zh.png)
 
 ## 功能
@@ -119,10 +121,10 @@ pi install git:github.com/gszj2018/pi-permission-bash-cmd-checker
 | `classifier.thresholds.safe`       | `0.5`                 | 安全类别所需的最低概率。                                                                          |
 | `classifier.thresholds.unsafe`     | `0.3`                 | 危险类别所需的最低概率。                                                                          |
 | `classifier.thresholds.confidence` | `0.8`                 | 接受评估结论所需的最低置信度。                                                                    |
-| `widget.commandViewerShortcut`     | `"alt+c"`             | 在外部查看器中查看完整命令的快捷键。                                                                        |
+| `widget.commandViewerShortcut`     | `"alt+c"`             | 在外部查看器中查看完整命令的快捷键。                                                              |
 | `externalViewer.command`           | `"code"`              | 查看器可执行文件名或路径。<br>为 null 时不配置查看器。                                            |
 | `externalViewer.args`              | `[]`                  | 传给查看器的字面参数，置于命令文件路径之前。                                                      |
-| `externalViewer.mode`              | `"detach"`            | `detach` 在后台启动查看器；`wait` 暂停 TUI 直到查看器退出。                                        |
+| `externalViewer.mode`              | `"detach"`            | `detach` 在后台启动查看器；`wait` 暂停 TUI 直到查看器退出。                                       |
 | `externalViewer.filePath`          | `null`                | 会话命令文件所在目录。<br>为 null 时使用系统临时目录下的固定子目录。                              |
 | `autoBlockUnsafe`                  | `false`               | 自动拦截被判定为危险的命令。                                                                      |
 
