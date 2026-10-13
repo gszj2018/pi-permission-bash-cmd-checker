@@ -6,6 +6,8 @@ A [Pi Coding Agent](https://github.com/earendil-works/pi) extension package that
 [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 with **bash command explanations and classifier-based risk assessment** in the terminal UI.
 
+![Bash command preview shown above the permission prompt](./media/screenshot_en.png)
+
 ## Features
 
 ### 1. Command Explanations

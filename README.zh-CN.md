@@ -6,6 +6,8 @@
 [`@gotgenes/pi-permission-system`](https://github.com/gotgenes/pi-packages/tree/main/packages/pi-permission-system)
 的**功能增强插件**，在终端 UI 中提供 **bash 命令解释与基于分类模型的风险评估**。
 
+![权限提示上方显示的命令预览](./media/screenshot_zh.png)
+
 ## 功能
 
 ### 1. 命令解释
