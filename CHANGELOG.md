@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-10-13
+
+### Added
+
+- Package gallery preview image through the `pi.image` manifest field.
+- Screenshots in the English and Simplified Chinese READMEs.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
