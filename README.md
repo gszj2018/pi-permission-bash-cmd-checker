@@ -8,7 +8,7 @@ with **bash command explanations and classifier-based risk assessment** in the t
 
 Inspired by GitHub Copilot in Visual Studio Code.
 
-![Bash command preview shown above the permission prompt](./media/screenshot_en.png)
+![Bash command preview shown above the permission prompt](https://raw.githubusercontent.com/gszj2018/pi-permission-bash-cmd-checker/refs/heads/media/media/screenshot_en.png)
 
 ## Features
 

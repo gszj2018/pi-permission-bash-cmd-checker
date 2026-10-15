@@ -8,7 +8,7 @@
 
 该扩展是受 VSCode 中的 Copilot 的相关功能的启发而制作的。
 
-![权限提示上方显示的命令预览](./media/screenshot_zh.png)
+![权限提示上方显示的命令预览](https://raw.githubusercontent.com/gszj2018/pi-permission-bash-cmd-checker/refs/heads/media/media/screenshot_zh.png)
 
 ## 功能
 
