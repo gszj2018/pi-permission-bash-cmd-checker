@@ -166,6 +166,12 @@ export function attachPermissions(
       if (state.decide(raw.requestId, { result: raw.result, resolution: raw.resolution })
         && state.visible?.observation.requestId === raw.requestId) refresh();
     }));
+    // A newly submitted interactive prompt hides the visible widget
+    subscriptions.push(pi.on("input", (event) => {
+      if (!state.active || event.source !== "interactive") return;
+      state.hide();
+      refresh();
+    }));
     signal?.addEventListener("abort", dispose, { once: true });
     if (signal?.aborted) dispose();
     else bind();

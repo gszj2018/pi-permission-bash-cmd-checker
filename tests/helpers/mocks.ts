@@ -73,8 +73,13 @@ export class MockPi {
     },
   } as unknown as ExtensionAPI;
 
-  async emitLifecycle(event: string, ctx: ExtensionContext, reason = "startup"): Promise<void> {
-    for (const handler of [...(this.handlers.get(event) ?? [])]) await handler({ type: event, reason }, ctx);
+  async emitLifecycle(
+    event: string,
+    ctx: ExtensionContext,
+    detail: string | Record<string, unknown> = "startup",
+  ): Promise<void> {
+    const payload = typeof detail === "string" ? { type: event, reason: detail } : { type: event, ...detail };
+    for (const handler of [...(this.handlers.get(event) ?? [])]) await handler(payload, ctx);
   }
   count(event: string): number { return this.handlers.get(event)?.size ?? 0; }
 }

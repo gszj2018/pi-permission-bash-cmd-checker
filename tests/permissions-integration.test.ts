@@ -115,6 +115,37 @@ test("UI prompts associate by requestId only, without comparing event projection
   assert.equal(app.runtime.state.size, 1);
 });
 
+test("a newly submitted interactive prompt hides the visible widget while retained records can be re-shown", async (t) => {
+  const app = setup(unavailableAnalyzer);
+  t.after(app.runtime.dispose);
+  const first = commandDetails("input-first");
+  assert.deepEqual(await app.service.run(first), { kind: "defer" });
+  assert.ok(app.ui.components.has(WIDGET_KEY));
+  // Only interactive submissions hide the widget; rpc and extension injections leave it visible.
+  await app.pi.emitLifecycle("input", app.ctx, { source: "rpc", text: "injected" });
+  await app.pi.emitLifecycle("input", app.ctx, { source: "extension", text: "injected" });
+  assert.ok(app.ui.components.has(WIDGET_KEY));
+  await app.pi.emitLifecycle("input", app.ctx, { source: "interactive", text: "next prompt" });
+  assert.equal(app.ui.components.has(WIDGET_KEY), false);
+  assert.equal(app.runtime.state.visible, undefined);
+  assert.equal(app.runtime.state.size, 1);
+  await app.pi.emitLifecycle("input", app.ctx, { source: "interactive", text: "another prompt" });
+  assert.equal(app.ui.components.has(WIDGET_KEY), false);
+  // A decision for the hidden record updates it without re-showing the widget.
+  app.pi.events.emit("permissions:decision", decision(first.requestId));
+  assert.equal(app.ui.components.has(WIDGET_KEY), false);
+  assert.equal(app.runtime.state.get(first.requestId)?.decision?.result, "allow");
+  // Later prompts and new supported requests re-show the retained records.
+  app.pi.events.emit("permissions:ui_prompt", promptEvent(first));
+  assert.ok(app.ui.text(WIDGET_KEY).includes("Completed: allow"));
+  const second = commandDetails("input-second", "printf 'second command'");
+  assert.deepEqual(await app.service.run(second), { kind: "defer" });
+  assert.ok(app.ui.text(WIDGET_KEY).includes("second command"));
+  assert.equal(app.runtime.state.size, 2);
+  app.runtime.dispose();
+  assert.equal(app.pi.count("input"), 0);
+});
+
 test("forwarded evidence and child identity are shown and saved using the serving TUI session file", async (t) => {
   const app = setup(unavailableAnalyzer);
   t.after(app.runtime.dispose);
