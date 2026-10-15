@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-10-15
+
+### Added
+
+- Hide the visible widget when a new prompt is submitted in the TUI (interactive input only).
+
+### Changed
+
+- README screenshots now reference the GitHub `media` branch raw URLs, and the `media` folder is no longer included in the published package.
+
 ## [0.2.1] - 2026-10-13
 
 ### Added
